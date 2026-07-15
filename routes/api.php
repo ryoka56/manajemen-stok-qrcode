@@ -3,33 +3,45 @@
 use App\Http\Controllers\Api\AssetController;
 use App\Http\Controllers\Api\ScanLogController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\AuthController;
 use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
 | API Routes - Sistem Informasi Manajemen Aset Digital Berbasis QR-Code
 |--------------------------------------------------------------------------
-| Semua endpoint di bawah bisa ditambah middleware auth:sanctum
-| kalau butuh login untuk petugas gudang.
 */
 
-Route::prefix('assets')->group(function () {
-    Route::get('/', [AssetController::class, 'index']);
-    Route::post('/', [AssetController::class, 'store']);
-    Route::get('/{asset}', [AssetController::class, 'show']);
-    Route::put('/{asset}', [AssetController::class, 'update']);
-    Route::delete('/{asset}', [AssetController::class, 'destroy']);
-    Route::get('/{asset}/qrcode', [AssetController::class, 'qrcode']);
-    Route::get('/scan/{kode_aset}', [AssetController::class, 'scan']);
-});
+// ---------- Publik (tidak perlu login) ----------
+Route::post('/login', [AuthController::class, 'login']);
 
-Route::prefix('scan-logs')->group(function () {
-    Route::get('/', [ScanLogController::class, 'index']);
-    Route::post('/', [ScanLogController::class, 'store']);
-    Route::get('/peta', [ScanLogController::class, 'peta']);
-});
+// ---------- Wajib login (admin & petugas) ----------
+Route::middleware('auth:sanctum')->group(function () {
+    Route::post('/logout', [AuthController::class, 'logout']);
+    Route::get('/me', [AuthController::class, 'me']);
 
-Route::prefix('reports')->group(function () {
-    Route::get('/excel', [ReportController::class, 'exportExcel']);
-    Route::get('/pdf', [ReportController::class, 'exportPdf']);
+    // Lihat daftar barang & detail: admin & petugas boleh
+    Route::get('/assets', [AssetController::class, 'index']);
+    Route::get('/assets/{asset}', [AssetController::class, 'show']);
+    Route::get('/assets/{asset}/qrcode', [AssetController::class, 'qrcode']);
+    Route::get('/assets/scan/{kode_aset}', [AssetController::class, 'scan']);
+
+    // Scan/pinjam barang: admin & petugas boleh
+    Route::get('/scan-logs', [ScanLogController::class, 'index']);
+    Route::post('/scan-logs', [ScanLogController::class, 'store']);
+    Route::get('/scan-logs/peta', [ScanLogController::class, 'peta']);
+
+    // ---------- Khusus admin ----------
+    Route::middleware('admin')->group(function () {
+        Route::post('/assets', [AssetController::class, 'store']);
+        Route::put('/assets/{asset}', [AssetController::class, 'update']);
+        Route::delete('/assets/{asset}', [AssetController::class, 'destroy']);
+
+        Route::get('/reports/excel', [ReportController::class, 'exportExcel']);
+        Route::get('/reports/pdf', [ReportController::class, 'exportPdf']);
+
+        Route::get('/users', [AuthController::class, 'index']);
+        Route::post('/users', [AuthController::class, 'store']);
+        Route::delete('/users/{user}', [AuthController::class, 'destroy']);
+    });
 });

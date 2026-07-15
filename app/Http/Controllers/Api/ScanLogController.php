@@ -10,10 +10,21 @@ use Illuminate\Http\Request;
 class ScanLogController extends Controller
 {
     // GET /api/scan-logs
-    // Riwayat lengkap semua aktivitas scan & perpindahan barang, terbaru duluan
+    // Riwayat aktivitas scan. Petugas hanya lihat riwayat miliknya sendiri,
+    // admin bisa lihat semua (atau filter by user_id tertentu).
     public function index(Request $request)
     {
-        $query = ScanLog::with('asset:id,nama_barang,kode_aset,kategori,status');
+        $query = ScanLog::with(['asset:id,nama_barang,kode_aset,kategori,status', 'user:id,name']);
+
+        $user = $request->user();
+
+        if ($user && !$user->isAdmin()) {
+            // Petugas: hanya riwayat miliknya sendiri
+            $query->where('user_id', $user->id);
+        } elseif ($request->filled('user_id')) {
+            // Admin: boleh filter riwayat petugas tertentu
+            $query->where('user_id', $request->user_id);
+        }
 
         if ($request->filled('asset_id')) {
             $query->where('asset_id', $request->asset_id);
@@ -26,34 +37,33 @@ class ScanLogController extends Controller
 
     // POST /api/scan-logs
     // Dipanggil setelah user scan QR di lokasi tujuan dan mengisi form lokasi.
-    // Nama petugas wajib diisi (siapa yang mengambil/memindahkan barang),
-    // dan status barang bisa sekaligus diperbarui di sini (mis. jadi "dipinjam").
+    // Nama petugas & user_id otomatis diambil dari akun yang sedang login.
     public function store(Request $request)
     {
         $data = $request->validate([
             'kode_aset' => 'required|string|exists:assets,kode_aset',
-            'lokasi_input' => 'required|string|max:255', // "barang ini ada di ruangan A"
+            'lokasi_input' => 'required|string|max:255',
             'latitude' => 'required|numeric|between:-90,90',
             'longitude' => 'required|numeric|between:-180,180',
-            'nama_petugas' => 'required|string|max:100', // wajib: siapa yang mengambil barang
             'catatan' => 'nullable|string',
             'status' => 'nullable|in:tersedia,dipinjam,rusak',
         ]);
 
         $asset = Asset::where('kode_aset', $data['kode_aset'])->firstOrFail();
+        $user = $request->user();
 
         $log = ScanLog::create([
             'asset_id' => $asset->id,
+            'user_id' => $user->id,
             'lokasi_input' => $data['lokasi_input'],
             'latitude' => $data['latitude'],
             'longitude' => $data['longitude'],
-            'nama_petugas' => $data['nama_petugas'],
+            'nama_petugas' => $user->name,
             'catatan' => $data['catatan'] ?? null,
             'status_saat_itu' => $data['status'] ?? $asset->status,
             'scanned_at' => now(),
         ]);
 
-        // Kalau status ikut diubah saat scan, update juga status utama asetnya
         if (!empty($data['status']) && $data['status'] !== $asset->status) {
             $asset->update(['status' => $data['status']]);
         }
@@ -62,15 +72,19 @@ class ScanLogController extends Controller
     }
 
     // GET /api/scan-logs/peta
-    // Ambil semua titik lokasi terbaru tiap aset untuk ditampilkan di peta (GIS overview)
-    public function peta()
+    public function peta(Request $request)
     {
-        $titik = ScanLog::with('asset:id,nama_barang,kode_aset,kategori,status')
+        $query = ScanLog::with(['asset:id,nama_barang,kode_aset,kategori,status', 'user:id,name'])
             ->whereIn('id', function ($q) {
                 $q->selectRaw('MAX(id)')->from('scan_logs')->groupBy('asset_id');
-            })
-            ->get();
+            });
 
-        return response()->json($titik);
+        $user = $request->user();
+        if ($user && !$user->isAdmin()) {
+            // Petugas cuma lihat titik barang yang pernah dia scan sendiri
+            $query->where('user_id', $user->id);
+        }
+
+        return response()->json($query->get());
     }
 }
