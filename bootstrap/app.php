@@ -17,6 +17,13 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin' => EnsureUserIsAdmin::class,
         ]);
     })
-    ->withExceptions(function (Exceptions $exceptions): void {
-        //
+    ->withExceptions(function (Exceptions $exceptions) {
+        // Semua request ke /api/* selalu dibalas JSON,
+        // termasuk saat belum login (401) - bukan mencoba redirect ke halaman login.
+        $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e, $request) {
+            if ($request->is('api/*')) {
+                return response()->json(['message' => 'Unauthenticated. Silakan login terlebih dahulu.'], 401);
+            }
+        });
+
     })->create();
