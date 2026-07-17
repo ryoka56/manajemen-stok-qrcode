@@ -5,12 +5,13 @@ use App\Http\Controllers\Api\ScanLogController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\RuanganController;
+use App\Http\Controllers\Api\KategoriController;
 use Illuminate\Support\Facades\Route;
 
-// ---------- Publik (tidak perlu login) ----------
+// ---------- Publik ----------
 Route::post('/login', [AuthController::class, 'login']);
 
-// ---------- Wajib login (admin & petugas) ----------
+// ---------- Wajib login ----------
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
@@ -24,8 +25,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/scan-logs', [ScanLogController::class, 'store']);
     Route::get('/scan-logs/peta', [ScanLogController::class, 'peta']);
 
-    // Daftar ruangan: admin & petugas boleh lihat (dipakai saat pinjam barang)
+    // Master data - boleh dilihat admin & petugas (untuk pilihan dropdown)
     Route::get('/ruangans', [RuanganController::class, 'index']);
+    Route::get('/kategoris', [KategoriController::class, 'index']);
 
     // ---------- Khusus admin ----------
     Route::middleware('admin')->group(function () {
@@ -43,5 +45,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/ruangans', [RuanganController::class, 'store']);
         Route::put('/ruangans/{ruangan}', [RuanganController::class, 'update']);
         Route::delete('/ruangans/{ruangan}', [RuanganController::class, 'destroy']);
+
+        Route::post('/kategoris', [KategoriController::class, 'store']);
+        Route::delete('/kategoris/{kategori}', [KategoriController::class, 'destroy']);
     });
 });
