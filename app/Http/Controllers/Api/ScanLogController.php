@@ -45,6 +45,7 @@ class ScanLogController extends Controller
             'lokasi_input' => 'required|string|max:255',
             'latitude' => 'required|numeric|between:-90,90',
             'longitude' => 'required|numeric|between:-180,180',
+            'nama_peminjam' => 'required|string|max:100',
             'catatan' => 'nullable|string',
             'status' => 'nullable|in:tersedia,dipinjam,rusak',
         ]);
@@ -59,6 +60,7 @@ class ScanLogController extends Controller
             'latitude' => $data['latitude'],
             'longitude' => $data['longitude'],
             'nama_petugas' => $user->name,
+            'nama_peminjam' => $data['nama_peminjam'],
             'catatan' => $data['catatan'] ?? null,
             'status_saat_itu' => $data['status'] ?? $asset->status,
             'scanned_at' => now(),
@@ -86,5 +88,63 @@ class ScanLogController extends Controller
         }
 
         return response()->json($query->get());
+    }
+
+    // GET /api/scan-logs/statistik?periode=harian|mingguan|bulanan|tahunan|semua
+    // Khusus admin - hitung jumlah peminjaman per periode, plus rincian per hari.
+    public function statistik(Request $request)
+    {
+        $periode = $request->get('periode', 'harian');
+        $sekarang = now();
+
+        $query = ScanLog::query();
+
+        switch ($periode) {
+            case 'harian':
+                $query->whereDate('scanned_at', $sekarang->toDateString());
+                break;
+            case 'mingguan':
+                $query->whereBetween('scanned_at', [
+                    $sekarang->copy()->startOfWeek(),
+                    $sekarang->copy()->endOfWeek(),
+                ]);
+                break;
+            case 'bulanan':
+                $query->whereYear('scanned_at', $sekarang->year)
+                      ->whereMonth('scanned_at', $sekarang->month);
+                break;
+            case 'tahunan':
+                $query->whereYear('scanned_at', $sekarang->year);
+                break;
+            case 'semua':
+            default:
+                // tidak difilter, ambil semua data
+                break;
+        }
+
+        $total = (clone $query)->count();
+
+        // Rincian jumlah peminjaman per tanggal, untuk ditampilkan sebagai grafik sederhana
+        $rincian = (clone $query)
+            ->selectRaw('DATE(scanned_at) as tanggal, COUNT(*) as jumlah')
+            ->groupBy('tanggal')
+            ->orderBy('tanggal')
+            ->get();
+
+        // Barang paling sering dipinjam pada periode ini
+        $barangTerpopuler = (clone $query)
+            ->join('assets', 'assets.id', '=', 'scan_logs.asset_id')
+            ->selectRaw('assets.nama_barang, COUNT(*) as jumlah')
+            ->groupBy('assets.nama_barang')
+            ->orderByDesc('jumlah')
+            ->limit(5)
+            ->get();
+
+        return response()->json([
+            'periode' => $periode,
+            'total' => $total,
+            'rincian_harian' => $rincian,
+            'barang_terpopuler' => $barangTerpopuler,
+        ]);
     }
 }

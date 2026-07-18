@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\RuanganController;
 use App\Http\Controllers\Api\KategoriController;
+use App\Http\Controllers\Api\StatistikController;
 use Illuminate\Support\Facades\Route;
 
 // ---------- Publik ----------
@@ -48,5 +49,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::post('/kategoris', [KategoriController::class, 'store']);
         Route::delete('/kategoris/{kategori}', [KategoriController::class, 'destroy']);
+
+        Route::get('/scan-logs/statistik', [ScanLogController::class, 'statistik']);
     });
 });
