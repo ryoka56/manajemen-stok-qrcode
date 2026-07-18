@@ -16,6 +16,7 @@ class ScanLog extends Model
         'latitude',
         'longitude',
         'nama_petugas',
+        'nama_peminjam',
         'catatan',
         'status_saat_itu',
         'scanned_at',
