@@ -92,6 +92,44 @@ class ScanLogController extends Controller
 
     // GET /api/scan-logs/statistik?periode=harian|mingguan|bulanan|tahunan|semua
     // Khusus admin - hitung jumlah peminjaman per periode, plus rincian per hari.
+    // GET /api/scan-logs/grafik-tahunan?tahun=2026
+    // Data jumlah peminjaman per bulan (Jan-Des) untuk ditampilkan sebagai grafik batang
+    // di Dashboard Tinjauan, mirip statistik peminjaman bulanan.
+    public function grafikTahunan(Request $request)
+    {
+        $tahun = $request->get('tahun', now()->year);
+
+        $data = ScanLog::whereYear('scanned_at', $tahun)
+            ->selectRaw('MONTH(scanned_at) as bulan, COUNT(*) as jumlah')
+            ->groupBy('bulan')
+            ->orderBy('bulan')
+            ->get()
+            ->keyBy('bulan');
+
+        $hasil = [];
+        for ($i = 1; $i <= 12; $i++) {
+            $hasil[] = [
+                'bulan' => $i,
+                'jumlah' => $data->has($i) ? $data[$i]->jumlah : 0,
+            ];
+        }
+
+        // Barang paling banyak dipinjam sepanjang tahun ini
+        $topItem = ScanLog::whereYear('scanned_at', $tahun)
+            ->join('assets', 'assets.id', '=', 'scan_logs.asset_id')
+            ->selectRaw('assets.nama_barang, COUNT(*) as jumlah')
+            ->groupBy('assets.nama_barang')
+            ->orderByDesc('jumlah')
+            ->first();
+
+        return response()->json([
+            'tahun' => (int) $tahun,
+            'data_bulanan' => $hasil,
+            'total_tahun_ini' => array_sum(array_column($hasil, 'jumlah')),
+            'top_item' => $topItem?->nama_barang,
+        ]);
+    }
+
     public function statistik(Request $request)
     {
         $periode = $request->get('periode', 'harian');

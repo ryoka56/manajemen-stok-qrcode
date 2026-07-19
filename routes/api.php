@@ -51,5 +51,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/kategoris/{kategori}', [KategoriController::class, 'destroy']);
 
         Route::get('/scan-logs/statistik', [ScanLogController::class, 'statistik']);
+        Route::get('/scan-logs/grafik-tahunan', [ScanLogController::class, 'grafikTahunan']);
     });
 });
