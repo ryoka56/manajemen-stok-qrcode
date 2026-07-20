@@ -130,6 +130,99 @@ class ScanLogController extends Controller
         ]);
     }
 
+    // GET /api/scan-logs/grafik?periode=mingguan|bulanan|tahunan
+    // Data grafik untuk Dashboard Tinjauan, dengan rincian breakdown per alat
+    // di setiap titik (bar) agar bisa ditampilkan sebagai tooltip saat bar di-tap.
+    // - mingguan  : 7 titik (Sen-Min) untuk minggu berjalan
+    // - bulanan   : 1 titik per tanggal pada bulan berjalan
+    // - tahunan   : 12 titik (Jan-Des) pada tahun berjalan
+    public function grafik(Request $request)
+    {
+        $periode = $request->get('periode', 'bulanan');
+        $sekarang = now();
+
+        $namaHari = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+        $namaBulan = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
+
+        $titik = []; // masing-masing: ['label' => ..., 'awal' => Carbon, 'akhir' => Carbon]
+
+        switch ($periode) {
+            case 'mingguan':
+                $mulaiMinggu = $sekarang->copy()->startOfWeek();
+                for ($i = 0; $i < 7; $i++) {
+                    $hari = $mulaiMinggu->copy()->addDays($i);
+                    $titik[] = [
+                        'label' => $namaHari[$i],
+                        'awal' => $hari->copy()->startOfDay(),
+                        'akhir' => $hari->copy()->endOfDay(),
+                    ];
+                }
+                break;
+
+            case 'tahunan':
+                for ($i = 1; $i <= 12; $i++) {
+                    $awal = $sekarang->copy()->startOfYear()->month($i)->startOfMonth();
+                    $titik[] = [
+                        'label' => $namaBulan[$i - 1],
+                        'awal' => $awal,
+                        'akhir' => $awal->copy()->endOfMonth(),
+                    ];
+                }
+                break;
+
+            case 'bulanan':
+            default:
+                $periode = 'bulanan';
+                $jumlahHari = $sekarang->copy()->daysInMonth;
+                for ($i = 1; $i <= $jumlahHari; $i++) {
+                    $tgl = $sekarang->copy()->startOfMonth()->day($i);
+                    $titik[] = [
+                        'label' => (string) $i,
+                        'awal' => $tgl->copy()->startOfDay(),
+                        'akhir' => $tgl->copy()->endOfDay(),
+                    ];
+                }
+                break;
+        }
+
+        $hasil = [];
+        foreach ($titik as $t) {
+            $queryTitik = ScanLog::whereBetween('scanned_at', [$t['awal'], $t['akhir']]);
+            $jumlah = (clone $queryTitik)->count();
+
+            $breakdown = (clone $queryTitik)
+                ->join('assets', 'assets.id', '=', 'scan_logs.asset_id')
+                ->selectRaw('assets.nama_barang, COUNT(*) as jumlah')
+                ->groupBy('assets.nama_barang')
+                ->orderByDesc('jumlah')
+                ->get();
+
+            $hasil[] = [
+                'label' => $t['label'],
+                'tanggal' => $t['awal']->toDateString(),
+                'jumlah' => $jumlah,
+                'breakdown' => $breakdown,
+            ];
+        }
+
+        $awalPeriode = $titik[0]['awal'];
+        $akhirPeriode = end($titik)['akhir'];
+
+        $topItem = ScanLog::whereBetween('scanned_at', [$awalPeriode, $akhirPeriode])
+            ->join('assets', 'assets.id', '=', 'scan_logs.asset_id')
+            ->selectRaw('assets.nama_barang, COUNT(*) as jumlah')
+            ->groupBy('assets.nama_barang')
+            ->orderByDesc('jumlah')
+            ->first();
+
+        return response()->json([
+            'periode' => $periode,
+            'data' => $hasil,
+            'total' => array_sum(array_column($hasil, 'jumlah')),
+            'top_item' => $topItem?->nama_barang,
+        ]);
+    }
+
     public function statistik(Request $request)
     {
         $periode = $request->get('periode', 'harian');
