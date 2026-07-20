@@ -12,6 +12,15 @@ use Illuminate\Support\Facades\Route;
 // ---------- Publik ----------
 Route::post('/login', [AuthController::class, 'login']);
 
+// ---------- Laporan (Excel/PDF) ----------
+// Dibuka lewat browser baru (bukan dari dalam app), jadi tokennya dikirim
+// lewat query string (?token=...), makanya middleware 'token.query' harus
+// jalan LEBIH DULU sebelum 'auth:sanctum' supaya headernya sempat disalin.
+Route::middleware(['token.query', 'auth:sanctum', 'admin'])->group(function () {
+    Route::get('/reports/excel', [ReportController::class, 'exportExcel']);
+    Route::get('/reports/pdf', [ReportController::class, 'exportPdf']);
+});
+
 // ---------- Wajib login ----------
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);
@@ -35,9 +44,6 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/assets', [AssetController::class, 'store']);
         Route::put('/assets/{asset}', [AssetController::class, 'update']);
         Route::delete('/assets/{asset}', [AssetController::class, 'destroy']);
-
-        Route::get('/reports/excel', [ReportController::class, 'exportExcel']);
-        Route::get('/reports/pdf', [ReportController::class, 'exportPdf']);
 
         Route::get('/users', [AuthController::class, 'index']);
         Route::post('/users', [AuthController::class, 'store']);
