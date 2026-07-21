@@ -19,6 +19,9 @@ class ScanLog extends Model
         'nama_peminjam',
         'catatan',
         'status_saat_itu',
+        'status_sebelum',
+        'is_peminjaman',
+        'is_pengembalian',
         'scanned_at',
     ];
 
@@ -26,6 +29,8 @@ class ScanLog extends Model
         'scanned_at' => 'datetime',
         'latitude' => 'float',
         'longitude' => 'float',
+        'is_peminjaman' => 'boolean',
+        'is_pengembalian' => 'boolean',
     ];
 
     public function asset()

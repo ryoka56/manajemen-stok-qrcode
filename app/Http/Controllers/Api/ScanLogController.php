@@ -53,6 +53,15 @@ class ScanLogController extends Controller
         $asset = Asset::where('kode_aset', $data['kode_aset'])->firstOrFail();
         $user = $request->user();
 
+        $statusSebelum = $asset->status;
+        $statusBaru = $data['status'] ?? $asset->status;
+
+        // Statistik "Peminjaman" HANYA naik kalau transisinya beneran
+        // (tersedia/rusak) -> dipinjam. Selain itu (mis. tersedia <-> rusak)
+        // dianggap bukan aksi pinjam, jadi tidak dihitung.
+        $isPeminjaman = $statusSebelum !== 'dipinjam' && $statusBaru === 'dipinjam';
+        $isPengembalian = $statusSebelum === 'dipinjam' && $statusBaru !== 'dipinjam';
+
         $log = ScanLog::create([
             'asset_id' => $asset->id,
             'user_id' => $user->id,
@@ -62,12 +71,15 @@ class ScanLogController extends Controller
             'nama_petugas' => $user->name,
             'nama_peminjam' => $data['nama_peminjam'],
             'catatan' => $data['catatan'] ?? null,
-            'status_saat_itu' => $data['status'] ?? $asset->status,
+            'status_saat_itu' => $statusBaru,
+            'status_sebelum' => $statusSebelum,
+            'is_peminjaman' => $isPeminjaman,
+            'is_pengembalian' => $isPengembalian,
             'scanned_at' => now(),
         ]);
 
-        if (!empty($data['status']) && $data['status'] !== $asset->status) {
-            $asset->update(['status' => $data['status']]);
+        if ($statusBaru !== $statusSebelum) {
+            $asset->update(['status' => $statusBaru]);
         }
 
         return response()->json($log, 201);
@@ -187,7 +199,7 @@ class ScanLogController extends Controller
 
         $hasil = [];
         foreach ($titik as $t) {
-            $queryTitik = ScanLog::whereBetween('scanned_at', [$t['awal'], $t['akhir']]);
+            $queryTitik = ScanLog::where('is_peminjaman', true)->whereBetween('scanned_at', [$t['awal'], $t['akhir']]);
             $jumlah = (clone $queryTitik)->count();
 
             $breakdown = (clone $queryTitik)
@@ -208,7 +220,7 @@ class ScanLogController extends Controller
         $awalPeriode = $titik[0]['awal'];
         $akhirPeriode = end($titik)['akhir'];
 
-        $topItem = ScanLog::whereBetween('scanned_at', [$awalPeriode, $akhirPeriode])
+        $topItem = ScanLog::where('is_peminjaman', true)->whereBetween('scanned_at', [$awalPeriode, $akhirPeriode])
             ->join('assets', 'assets.id', '=', 'scan_logs.asset_id')
             ->selectRaw('assets.nama_barang, COUNT(*) as jumlah')
             ->groupBy('assets.nama_barang')
@@ -228,7 +240,10 @@ class ScanLogController extends Controller
         $periode = $request->get('periode', 'harian');
         $sekarang = now();
 
-        $query = ScanLog::query();
+        // Statistik "peminjaman" cuma menghitung transisi status beneran
+        // (tersedia/rusak) -> dipinjam. Perubahan status lain (mis.
+        // tersedia <-> rusak) tidak dianggap aksi pinjam.
+        $query = ScanLog::query()->where('is_peminjaman', true);
 
         switch ($periode) {
             case 'harian':
