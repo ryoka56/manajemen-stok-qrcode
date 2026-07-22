@@ -42,6 +42,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // ---------- Khusus admin ----------
     Route::middleware('admin')->group(function () {
         Route::post('/assets', [AssetController::class, 'store']);
+        // Route bulk HARUS didaftarkan sebelum /assets/{asset} supaya "bulk"
+        // tidak ketangkep sebagai parameter {asset} (route matching dari atas ke bawah).
+        Route::delete('/assets/bulk', [AssetController::class, 'destroyBulk']);
         Route::put('/assets/{asset}', [AssetController::class, 'update']);
         Route::delete('/assets/{asset}', [AssetController::class, 'destroy']);
 

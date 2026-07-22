@@ -10,6 +10,8 @@ use SimpleSoftwareIO\QrCode\Facades\QrCode;
 class AssetController extends Controller
 {
     // GET /api/assets
+    // Mendukung: ?cari= (nama barang), ?kategori= (filter kategori),
+    // ?page= & ?per_page= (paginasi, dipakai list "berhalaman" & infinite-scroll di app)
     public function index(Request $request)
     {
         $query = Asset::with('lokasiTerakhir');
@@ -21,7 +23,28 @@ class AssetController extends Controller
             $query->where('nama_barang', 'like', '%' . $request->cari . '%');
         }
 
-        return response()->json($query->latest()->paginate(20));
+        // per_page dibatasi max 100 supaya tidak disalahgunakan buat narik semua data sekaligus
+        $perPage = (int) $request->input('per_page', 15);
+        $perPage = max(1, min($perPage, 100));
+
+        return response()->json($query->latest()->paginate($perPage));
+    }
+
+    // DELETE /api/assets/bulk
+    // Body: { "ids": [1, 2, 3, ...] } - hapus banyak barang sekaligus
+    public function destroyBulk(Request $request)
+    {
+        $data = $request->validate([
+            'ids' => 'required|array|min:1',
+            'ids.*' => 'integer|exists:assets,id',
+        ]);
+
+        $jumlah = Asset::whereIn('id', $data['ids'])->delete();
+
+        return response()->json([
+            'message' => "$jumlah barang berhasil dihapus",
+            'jumlah_dihapus' => $jumlah,
+        ]);
     }
 
     // POST /api/assets
