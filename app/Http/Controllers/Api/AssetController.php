@@ -11,13 +11,16 @@ class AssetController extends Controller
 {
     // GET /api/assets
     // Mendukung: ?cari= (nama barang), ?kategori= (filter kategori),
-    // ?page= & ?per_page= (paginasi, dipakai list "berhalaman" & infinite-scroll di app)
+    // ?ruangan= (filter ruangan/rak asal), ?page= & ?per_page= (paginasi)
     public function index(Request $request)
     {
         $query = Asset::with('lokasiTerakhir');
 
         if ($request->filled('kategori')) {
             $query->where('kategori', $request->kategori);
+        }
+        if ($request->filled('ruangan')) {
+            $query->where('ruangan_asal', $request->ruangan);
         }
         if ($request->filled('cari')) {
             $query->where('nama_barang', 'like', '%' . $request->cari . '%');
