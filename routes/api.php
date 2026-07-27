@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\RuanganController;
 use App\Http\Controllers\Api\KategoriController;
+use App\Http\Controllers\Api\PegawaiController;
 use App\Http\Controllers\Api\StatistikController;
 use Illuminate\Support\Facades\Route;
 
@@ -46,6 +47,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Master data - boleh dilihat admin & petugas (untuk pilihan dropdown)
     Route::get('/ruangans', [RuanganController::class, 'index']);
     Route::get('/kategoris', [KategoriController::class, 'index']);
+    Route::get('/pegawais', [PegawaiController::class, 'index']);
 
     // ---------- Khusus admin ----------
     Route::middleware('admin')->group(function () {
@@ -66,6 +68,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::post('/kategoris', [KategoriController::class, 'store']);
         Route::delete('/kategoris/{kategori}', [KategoriController::class, 'destroy']);
+        Route::post('/pegawais', [PegawaiController::class, 'store']);
+        Route::delete('/pegawais/{pegawai}', [PegawaiController::class, 'destroy']);
 
         Route::get('/scan-logs/statistik', [ScanLogController::class, 'statistik']);
         Route::get('/scan-logs/grafik-tahunan', [ScanLogController::class, 'grafikTahunan']);
