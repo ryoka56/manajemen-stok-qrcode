@@ -45,7 +45,10 @@ class ScanLogController extends Controller
             'lokasi_input' => 'required|string|max:255',
             'latitude' => 'required|numeric|between:-90,90',
             'longitude' => 'required|numeric|between:-180,180',
-            'nama_peminjam' => 'required|string|max:100',
+            // Nama peminjam cuma WAJIB diisi kalau aksi ini bikin status
+            // jadi 'dipinjam'. Kalau lagi mengembalikan/status lain, boleh
+            // kosong - gak masuk akal nanya "siapa peminjam" pas ngembaliin.
+            'nama_peminjam' => 'nullable|string|max:100|required_if:status,dipinjam',
             'catatan' => 'nullable|string',
             'status' => 'nullable|in:tersedia,dipinjam,rusak',
         ]);
@@ -55,6 +58,20 @@ class ScanLogController extends Controller
 
         $statusSebelum = $asset->status;
         $statusBaru = $data['status'] ?? $asset->status;
+
+        // Cegah barang yang LAGI dipinjam orang lain "dipinjam" lagi oleh
+        // scan lain (mis. 2 petugas gak sadar scan barang yang sama).
+        // Kalau status barunya sama-sama 'dipinjam' padahal sebelumnya juga
+        // sudah 'dipinjam', berarti bukan aksi pinjam baru - tolak dengan
+        // pesan jelas siapa yang lagi pinjam sekarang.
+        if ($statusSebelum === 'dipinjam' && $statusBaru === 'dipinjam') {
+            $peminjamSekarang = $asset->lokasiTerakhir?->nama_peminjam;
+            return response()->json([
+                'message' => $peminjamSekarang
+                    ? "Barang ini sedang dipinjam oleh \"$peminjamSekarang\". Kembalikan dulu sebelum dipinjamkan lagi."
+                    : 'Barang ini sedang dipinjam. Kembalikan dulu sebelum dipinjamkan lagi.',
+            ], 409);
+        }
 
         // Statistik "Peminjaman" HANYA naik kalau transisinya beneran
         // (tersedia/rusak) -> dipinjam. Selain itu (mis. tersedia <-> rusak)
@@ -69,7 +86,7 @@ class ScanLogController extends Controller
             'latitude' => $data['latitude'],
             'longitude' => $data['longitude'],
             'nama_petugas' => $user->name,
-            'nama_peminjam' => $data['nama_peminjam'],
+            'nama_peminjam' => $data['nama_peminjam'] ?? null,
             'catatan' => $data['catatan'] ?? null,
             'status_saat_itu' => $statusBaru,
             'status_sebelum' => $statusSebelum,

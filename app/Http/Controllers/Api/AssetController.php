@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Asset;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
 class AssetController extends Controller
@@ -34,7 +35,10 @@ class AssetController extends Controller
     }
 
     // DELETE /api/assets/bulk
-    // Body: { "ids": [1, 2, 3, ...] } - hapus banyak barang sekaligus
+    // Body: { "ids": [1, 2, 3, ...] } - hapus banyak barang sekaligus.
+    // Ini SOFT delete (Asset pakai trait SoftDeletes) - barang masih ada di
+    // database dengan deleted_at terisi, bisa dipulihkan lewat /assets/trash
+    // + /assets/{id}/restore kalau ternyata salah pilih.
     public function destroyBulk(Request $request)
     {
         $data = $request->validate([
@@ -48,6 +52,78 @@ class AssetController extends Controller
             'message' => "$jumlah barang berhasil dihapus",
             'jumlah_dihapus' => $jumlah,
         ]);
+    }
+
+    // GET /api/assets/rekap
+    // Statistik dihitung langsung oleh database (GROUP BY/COUNT), bukan
+    // ditarik semua ke app lalu dihitung manual - jauh lebih ringan begitu
+    // data sudah ribuan baris. Dipakai Tinjauan, Kelola Ruangan, dsb.
+    public function rekap(Request $request)
+    {
+        $perStatus = Asset::select('status', DB::raw('count(*) as jumlah'))
+            ->groupBy('status')
+            ->get();
+
+        $perKategori = Asset::select('kategori', DB::raw('count(*) as jumlah'))
+            ->groupBy('kategori')
+            ->orderByDesc('jumlah')
+            ->get();
+
+        // Lokasi SAAT INI = hasil scan terakhir kalau ada, kalau belum
+        // pernah discan fallback ke ruangan_asal (sama seperti logika
+        // yang dipakai di tampilan Kelola Barang).
+        $perRuangan = DB::table('assets')
+            ->leftJoinSub(
+                DB::table('scan_logs')
+                    ->select('asset_id', 'lokasi_input')
+                    ->whereIn('id', function ($q) {
+                        $q->select(DB::raw('MAX(id)'))->from('scan_logs')->groupBy('asset_id');
+                    }),
+                'scan_terakhir',
+                'assets.id',
+                '=',
+                'scan_terakhir.asset_id'
+            )
+            ->whereNull('assets.deleted_at')
+            ->select(
+                DB::raw('COALESCE(scan_terakhir.lokasi_input, assets.ruangan_asal) as ruangan'),
+                DB::raw('count(*) as jumlah')
+            )
+            ->groupBy('ruangan')
+            ->orderByDesc('jumlah')
+            ->get();
+
+        return response()->json([
+            'per_status' => $perStatus,
+            'per_kategori' => $perKategori,
+            'per_ruangan' => $perRuangan,
+            'total' => Asset::count(),
+        ]);
+    }
+
+    // GET /api/assets/trash - daftar barang yang sudah dihapus (soft delete), admin only
+    public function trash()
+    {
+        return response()->json(
+            Asset::onlyTrashed()->latest('deleted_at')->paginate(30)
+        );
+    }
+
+    // POST /api/assets/{id}/restore - kembalikan barang yang sudah dihapus, admin only
+    public function restore($id)
+    {
+        $asset = Asset::onlyTrashed()->findOrFail($id);
+        $asset->restore();
+        return response()->json(['message' => 'Barang berhasil dipulihkan', 'asset' => $asset]);
+    }
+
+    // DELETE /api/assets/{id}/force - hapus PERMANEN (gak bisa direstore lagi), admin only
+    public function forceDelete($id)
+    {
+        $asset = Asset::onlyTrashed()->findOrFail($id);
+        $nama = $asset->nama_barang;
+        $asset->forceDelete();
+        return response()->json(['message' => "\"$nama\" dihapus permanen"]);
     }
 
     // POST /api/assets
@@ -89,11 +165,11 @@ class AssetController extends Controller
         return response()->json($asset);
     }
 
-    // DELETE /api/assets/{asset}
+    // DELETE /api/assets/{asset} - soft delete, bisa dipulihkan lewat trash
     public function destroy(Asset $asset)
     {
         $asset->delete();
-        return response()->json(['message' => 'Aset berhasil dihapus']);
+        return response()->json(['message' => 'Aset berhasil dihapus (bisa dipulihkan lewat menu Sampah)']);
     }
 
     // GET /api/assets/{asset}/qrcode

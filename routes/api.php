@@ -27,9 +27,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/me', [AuthController::class, 'me']);
 
     Route::get('/assets', [AssetController::class, 'index']);
+    // Static path HARUS di atas /assets/{asset} (route matching dari atas ke bawah),
+    // kalau tidak "rekap"/"trash"/"scan" bakal ketangkep sebagai parameter {asset}.
+    Route::middleware('admin')->group(function () {
+        Route::get('/assets/rekap', [AssetController::class, 'rekap']);
+        Route::get('/assets/trash', [AssetController::class, 'trash']);
+        Route::post('/assets/{id}/restore', [AssetController::class, 'restore'])->whereNumber('id');
+        Route::delete('/assets/{id}/force', [AssetController::class, 'forceDelete'])->whereNumber('id');
+    });
+    Route::get('/assets/scan/{kode_aset}', [AssetController::class, 'scan']);
     Route::get('/assets/{asset}', [AssetController::class, 'show']);
     Route::get('/assets/{asset}/qrcode', [AssetController::class, 'qrcode']);
-    Route::get('/assets/scan/{kode_aset}', [AssetController::class, 'scan']);
 
     Route::get('/scan-logs', [ScanLogController::class, 'index']);
     Route::post('/scan-logs', [ScanLogController::class, 'store']);
