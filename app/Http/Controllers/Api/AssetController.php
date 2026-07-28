@@ -176,6 +176,44 @@ class AssetController extends Controller
         return response()->json(['message' => 'Aset berhasil dihapus (bisa dipulihkan lewat menu Sampah)']);
     }
 
+    // POST /api/assets/{asset}/foto - upload/ganti foto di slot 1/2/3 (admin only)
+    // Body: multipart, field 'foto' (file gambar) + 'slot' (1, 2, atau 3)
+    public function uploadFoto(Request $request, Asset $asset)
+    {
+        $data = $request->validate([
+            'slot' => 'required|integer|in:1,2,3',
+            'foto' => 'required|image|max:5120', // maks 5MB
+        ]);
+
+        $kolom = 'foto_' . $data['slot'];
+
+        // Hapus file lama di slot itu dulu (kalau ada) biar storage gak numpuk sampah
+        if ($asset->$kolom) {
+            \Illuminate\Support\Facades\Storage::disk('public')->delete($asset->$kolom);
+        }
+
+        $path = $request->file('foto')->store('asset-photos', 'public');
+        $asset->update([$kolom => $path]);
+
+        return response()->json($asset->fresh());
+    }
+
+    // DELETE /api/assets/{asset}/foto/{slot} - hapus foto di slot tertentu (admin only)
+    public function hapusFoto(Asset $asset, $slot)
+    {
+        if (!in_array($slot, ['1', '2', '3'])) {
+            return response()->json(['message' => 'Slot foto tidak valid'], 422);
+        }
+        $kolom = 'foto_' . $slot;
+
+        if ($asset->$kolom) {
+            \Illuminate\Support\Facades\Storage::disk('public')->delete($asset->$kolom);
+        }
+        $asset->update([$kolom => null]);
+
+        return response()->json($asset->fresh());
+    }
+
     // GET /api/assets/{asset}/qrcode
     // Menghasilkan gambar QR-code berisi kode_aset, untuk ditempel di barang fisik
     public function qrcode(Asset $asset)

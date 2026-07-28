@@ -57,6 +57,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/assets/bulk', [AssetController::class, 'destroyBulk']);
         Route::put('/assets/{asset}', [AssetController::class, 'update']);
         Route::delete('/assets/{asset}', [AssetController::class, 'destroy']);
+        Route::post('/assets/{asset}/foto', [AssetController::class, 'uploadFoto']);
+        Route::delete('/assets/{asset}/foto/{slot}', [AssetController::class, 'hapusFoto']);
 
         Route::get('/users', [AuthController::class, 'index']);
         Route::post('/users', [AuthController::class, 'store']);

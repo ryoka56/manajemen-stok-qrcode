@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -16,7 +17,9 @@ class Asset extends Model
         'deskripsi',
         'ruangan_asal',
         'status',
-        'foto',
+        'foto_1',
+        'foto_2',
+        'foto_3',
     ];
 
     public function scanLogs()
@@ -34,7 +37,7 @@ class Asset extends Model
     // Ambil dari nama_peminjam di scan terakhir (karena status jadi 'dipinjam'
     // itu justru DI-SET oleh scan itu sendiri, jadi log terakhir = aksi pinjam
     // yang bikin status jadi begini). Gak perlu kolom baru di tabel assets.
-    protected $appends = ['peminjam_saat_ini'];
+    protected $appends = ['peminjam_saat_ini', 'foto_urls'];
 
     public function getPeminjamSaatIniAttribute()
     {
@@ -44,5 +47,17 @@ class Asset extends Model
         return $this->relationLoaded('lokasiTerakhir')
             ? $this->lokasiTerakhir?->nama_peminjam
             : $this->lokasiTerakhir()->first()?->nama_peminjam;
+    }
+
+    // URL publik lengkap buat tiap slot foto (null kalau slot itu kosong).
+    // Kolom database cuma nyimpen path relatif (mis. "asset-photos/xxx.jpg"),
+    // jadi Flutter butuh URL lengkap buat nampilin gambarnya.
+    public function getFotoUrlsAttribute()
+    {
+        return [
+            'foto_1' => $this->foto_1 ? asset('storage/' . $this->foto_1) : null,
+            'foto_2' => $this->foto_2 ? asset('storage/' . $this->foto_2) : null,
+            'foto_3' => $this->foto_3 ? asset('storage/' . $this->foto_3) : null,
+        ];
     }
 }
