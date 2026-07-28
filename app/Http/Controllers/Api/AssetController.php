@@ -136,8 +136,12 @@ class AssetController extends Controller
             'ruangan_asal' => 'nullable|string|max:100',
         ]);
 
-        // generate kode aset unik otomatis, mis. AST-000123
-        $data['kode_aset'] = 'AST-' . str_pad((Asset::max('id') + 1), 6, '0', STR_PAD_LEFT);
+        // Generate kode aset unik otomatis, mis. AST-000123.
+        // PENTING: pakai withTrashed() supaya baris yang sudah di-soft-delete
+        // (masih ada di database, cuma ditandai deleted_at) tetap ikut
+        // dihitung - kalau tidak, nomornya bisa "dipakai ulang" dan tabrakan
+        // sama kode_aset punya barang yang sudah dihapus tapi belum permanen.
+        $data['kode_aset'] = 'AST-' . str_pad((Asset::withTrashed()->max('id') + 1), 6, '0', STR_PAD_LEFT);
 
         $asset = Asset::create($data);
 
