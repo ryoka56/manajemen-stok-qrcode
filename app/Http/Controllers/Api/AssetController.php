@@ -214,6 +214,27 @@ class AssetController extends Controller
         return response()->json($asset->fresh());
     }
 
+    // GET /foto/{path} - "serve" file foto lewat Laravel (bukan diakses
+    // langsung dari folder storage statis), khusus biar bisa nambahin header
+    // CORS. Soalnya Flutter Web (canvas renderer) ngambil gambar pakai
+    // fetch/XHR, bukan tag <img> biasa - itu WAJIB ada header CORS dari
+    // server, sedangkan file statis di /storage dilayani langsung sama web
+    // server (Nginx/Caddy Railway), gak lewat kode Laravel sama sekali,
+    // jadi konfigurasi CORS Laravel gak kesentuh di situ.
+    public function tampilkanFoto(Request $request, $path)
+    {
+        $fullPath = storage_path('app/public/' . $path);
+
+        if (!file_exists($fullPath) || !str_starts_with(realpath($fullPath), storage_path('app/public'))) {
+            abort(404);
+        }
+
+        return response()->file($fullPath, [
+            'Access-Control-Allow-Origin' => '*',
+            'Cache-Control' => 'public, max-age=86400',
+        ]);
+    }
+
     // GET /api/assets/{asset}/qrcode
     // Menghasilkan gambar QR-code berisi kode_aset, untuk ditempel di barang fisik
     public function qrcode(Asset $asset)

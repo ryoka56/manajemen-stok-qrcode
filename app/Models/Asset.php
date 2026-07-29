@@ -52,12 +52,20 @@ class Asset extends Model
     // URL publik lengkap buat tiap slot foto (null kalau slot itu kosong).
     // Kolom database cuma nyimpen path relatif (mis. "asset-photos/xxx.jpg"),
     // jadi Flutter butuh URL lengkap buat nampilin gambarnya.
+    // URL publik lengkap buat tiap slot foto (null kalau slot itu kosong).
+    // Diarahkan ke route /api/foto/{path} (lewat kode Laravel, bukan file
+    // statis langsung), biar responsenya bisa dikasih header CORS -
+    // dibutuhkan Flutter Web yang ngambil gambar pakai fetch/XHR, bukan
+    // tag <img> biasa yang gak butuh CORS. url() otomatis pakai https
+    // berkat URL::forceScheme() di AppServiceProvider.
     public function getFotoUrlsAttribute()
     {
+        $buat = fn ($path) => $path ? url('/api/foto/' . ltrim($path, '/')) : null;
+
         return [
-            'foto_1' => $this->foto_1 ? asset('storage/' . $this->foto_1) : null,
-            'foto_2' => $this->foto_2 ? asset('storage/' . $this->foto_2) : null,
-            'foto_3' => $this->foto_3 ? asset('storage/' . $this->foto_3) : null,
+            'foto_1' => $buat($this->foto_1),
+            'foto_2' => $buat($this->foto_2),
+            'foto_3' => $buat($this->foto_3),
         ];
     }
 }
