@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Asset;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportController extends Controller
@@ -58,9 +59,29 @@ class ReportController extends Controller
     {
         $assets = Asset::with('lokasiTerakhir')->orderBy('kode_aset')->get();
 
+        // Tanda tangan HANYA ditampilkan di laporan selama barangnya masih
+        // berstatus "dipinjam". Begitu dikembalikan/tersedia (atau rusak),
+        // TTD hilang dari laporan cetak - tapi filenya tetap ada & tetap
+        // bisa dilihat di riwayat per-barang (tidak dihapus, cuma tidak
+        // ditampilkan di sini). Dompdf butuh gambar dalam bentuk data URL
+        // base64 (bukan URL http biasa) karena server ini tidak mengizinkan
+        // dompdf mengambil gambar remote.
+        $tandaTanganBase64 = [];
+        foreach ($assets as $a) {
+            if ($a->status === 'dipinjam' && $a->lokasiTerakhir?->tanda_tangan) {
+                try {
+                    $isi = Storage::disk('public')->get($a->lokasiTerakhir->tanda_tangan);
+                    $tandaTanganBase64[$a->id] = 'data:image/png;base64,' . base64_encode($isi);
+                } catch (\Throwable $e) {
+                    // File tanda tangan hilang/corrupt - biarkan kosong, jangan gagalkan laporan
+                }
+            }
+        }
+
         $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('reports.aset', [
             'assets' => $assets,
             'tanggal' => now()->format('d F Y'),
+            'tandaTanganBase64' => $tandaTanganBase64,
         ])->setPaper('a4', 'landscape');
 
         $namaFile = 'laporan-aset-' . now()->format('Y-m-d') . '.pdf';

@@ -54,13 +54,13 @@ class ScanLogController extends Controller
             'nama_peminjam' => 'nullable|string|max:100|required_if:status,dipinjam',
             'catatan' => 'nullable|string',
             'status' => 'nullable|in:tersedia,dipinjam,rusak',
-            // Tanda tangan digital & centang persetujuan ketentuan HANYA wajib
-            // kalau aksi ini membuat status barang jadi 'dipinjam' - sama seperti
-            // aturan nama_peminjam di atas. Dikirim sebagai data URL base64
-            // (hasil ekspor canvas signature pad dari Flutter), bukan file upload
-            // biasa, makanya divalidasi sebagai string, bukan 'image'.
-            'tanda_tangan' => 'nullable|string|required_if:status,dipinjam',
-            'setuju_ketentuan' => 'nullable|boolean|accepted_if:status,dipinjam',
+            // Tanda tangan digital & centang persetujuan ketentuan sekarang WAJIB
+            // di setiap aksi scan (apapun status barunya), bukan cuma pas
+            // meminjam. Dikirim sebagai data URL base64 (hasil ekspor canvas
+            // signature pad dari Flutter), makanya divalidasi sebagai string,
+            // bukan 'image'.
+            'tanda_tangan' => 'required|string',
+            'setuju_ketentuan' => 'required|boolean|accepted',
         ]);
 
         $asset = Asset::where('kode_aset', $data['kode_aset'])->firstOrFail();
@@ -89,15 +89,11 @@ class ScanLogController extends Controller
         $isPeminjaman = $statusSebelum !== 'dipinjam' && $statusBaru === 'dipinjam';
         $isPengembalian = $statusSebelum === 'dipinjam' && $statusBaru !== 'dipinjam';
 
-        // Tanda tangan & ketentuan cuma diproses/disimpan kalau aksinya beneran
-        // peminjaman baru. Kalau bukan (mis. sekedar update status rusak),
-        // walaupun field-nya kekirim, sengaja tidak dipakai.
-        $pathTandaTangan = null;
-        $ketentuanSnapshot = null;
-        if ($isPeminjaman && !empty($data['tanda_tangan'])) {
-            $pathTandaTangan = $this->simpanTandaTangan($data['tanda_tangan']);
-            $ketentuanSnapshot = Pengaturan::ambil('deskripsi_persetujuan', '');
-        }
+        // Tanda tangan & ketentuan sekarang disimpan untuk SETIAP scan log
+        // (apapun transisinya), karena validasi di atas sudah mewajibkan
+        // keduanya di semua status.
+        $pathTandaTangan = $this->simpanTandaTangan($data['tanda_tangan']);
+        $ketentuanSnapshot = Pengaturan::ambil('deskripsi_persetujuan', '');
 
         $log = ScanLog::create([
             'asset_id' => $asset->id,
@@ -113,7 +109,7 @@ class ScanLogController extends Controller
             'is_peminjaman' => $isPeminjaman,
             'is_pengembalian' => $isPengembalian,
             'tanda_tangan' => $pathTandaTangan,
-            'setuju_ketentuan' => $isPeminjaman ? (bool) ($data['setuju_ketentuan'] ?? false) : false,
+            'setuju_ketentuan' => (bool) $data['setuju_ketentuan'],
             'ketentuan_snapshot' => $ketentuanSnapshot,
             'scanned_at' => now(),
         ]);

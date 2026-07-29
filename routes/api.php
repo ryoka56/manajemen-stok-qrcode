@@ -22,7 +22,9 @@ Route::get('/tanda-tangan/{path}', [AssetController::class, 'tampilkanFoto'])->w
 // Dibuka lewat browser baru (bukan dari dalam app), jadi tokennya dikirim
 // lewat query string (?token=...), makanya middleware 'token.query' harus
 // jalan LEBIH DULU sebelum 'auth:sanctum' supaya headernya sempat disalin.
-Route::middleware(['token.query', 'auth:sanctum', 'admin'])->group(function () {
+// Sengaja TIDAK dibatasi 'admin' - tombol export ada juga di layar petugas
+// (home_screen.dart), jadi siapa saja yang sudah login boleh mengunduh.
+Route::middleware(['token.query', 'auth:sanctum'])->group(function () {
     Route::get('/reports/excel', [ReportController::class, 'exportExcel']);
     Route::get('/reports/pdf', [ReportController::class, 'exportPdf']);
 });

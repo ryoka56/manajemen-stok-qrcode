@@ -14,6 +14,8 @@
         .status-dipinjam { color: #CC9A2E; font-weight: bold; }
         .status-rusak { color: #B03A3A; font-weight: bold; }
         .footer { margin-top: 20px; font-size: 9px; color: #999; }
+        .ttd-img { height: 40px; }
+        .ttd-kosong { color: #bbb; font-style: italic; }
     </style>
 </head>
 <body>
@@ -30,6 +32,7 @@
                 <th>Ruangan Asal</th>
                 <th>Lokasi Terakhir</th>
                 <th>Waktu Scan Terakhir</th>
+                <th>Tanda Tangan Peminjam</th>
             </tr>
         </thead>
         <tbody>
@@ -42,6 +45,13 @@
                 <td>{{ $a->ruangan_asal ?? '-' }}</td>
                 <td>{{ $a->lokasiTerakhir->lokasi_input ?? '-' }}</td>
                 <td>{{ $a->lokasiTerakhir ? \Carbon\Carbon::parse($a->lokasiTerakhir->scanned_at)->format('d/m/Y H:i') : '-' }}</td>
+                <td>
+                    @if (isset($tandaTanganBase64[$a->id]))
+                        <img class="ttd-img" src="{{ $tandaTanganBase64[$a->id] }}">
+                    @else
+                        <span class="ttd-kosong">-</span>
+                    @endif
+                </td>
             </tr>
             @endforeach
         </tbody>
