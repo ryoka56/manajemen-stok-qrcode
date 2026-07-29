@@ -17,9 +17,15 @@ Route::post('/login', [AuthController::class, 'login']);
 // Dibuka lewat browser baru (bukan dari dalam app), jadi tokennya dikirim
 // lewat query string (?token=...), makanya middleware 'token.query' harus
 // jalan LEBIH DULU sebelum 'auth:sanctum' supaya headernya sempat disalin.
-Route::middleware(['token.query', 'auth:sanctum', 'admin'])->group(function () {
-    Route::get('/reports/excel', [ReportController::class, 'exportExcel']);
+Route::middleware(['token.query', 'auth:sanctum'])->group(function () {
+    // Export ke PDF boleh dipakai admin & petugas (petugas butuh cetak
+    // daftar barang juga waktu di lapangan).
     Route::get('/reports/pdf', [ReportController::class, 'exportPdf']);
+
+    // Export ke Excel (CSV) tetap khusus admin.
+    Route::middleware('admin')->group(function () {
+        Route::get('/reports/excel', [ReportController::class, 'exportExcel']);
+    });
 });
 
 // ---------- Wajib login ----------
@@ -62,6 +68,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('/users', [AuthController::class, 'index']);
         Route::post('/users', [AuthController::class, 'store']);
+        Route::put('/users/{user}', [AuthController::class, 'update']);
         Route::delete('/users/{user}', [AuthController::class, 'destroy']);
 
         Route::post('/ruangans', [RuanganController::class, 'store']);
@@ -69,8 +76,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('/ruangans/{ruangan}', [RuanganController::class, 'destroy']);
 
         Route::post('/kategoris', [KategoriController::class, 'store']);
+        Route::put('/kategoris/{kategori}', [KategoriController::class, 'update']);
         Route::delete('/kategoris/{kategori}', [KategoriController::class, 'destroy']);
         Route::post('/pegawais', [PegawaiController::class, 'store']);
+        Route::put('/pegawais/{pegawai}', [PegawaiController::class, 'update']);
         Route::delete('/pegawais/{pegawai}', [PegawaiController::class, 'destroy']);
 
         Route::get('/scan-logs/statistik', [ScanLogController::class, 'statistik']);

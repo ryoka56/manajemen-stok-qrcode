@@ -26,6 +26,18 @@ class KategoriController extends Controller
         return response()->json($kategori, 201);
     }
 
+    // PUT /api/kategoris/{kategori} - khusus admin
+    public function update(Request $request, Kategori $kategori)
+    {
+        $data = $request->validate([
+            'nama_kategori' => 'required|string|max:100|unique:kategoris,nama_kategori,' . $kategori->id,
+            'keterangan' => 'nullable|string',
+        ]);
+
+        $kategori->update($data);
+        return response()->json($kategori);
+    }
+
     // DELETE /api/kategoris/{kategori} - khusus admin
     public function destroy(Kategori $kategori)
     {

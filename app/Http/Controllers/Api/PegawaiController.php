@@ -27,6 +27,18 @@ class PegawaiController extends Controller
         return response()->json($pegawai, 201);
     }
 
+    // PUT /api/pegawais/{pegawai} - khusus admin
+    public function update(Request $request, Pegawai $pegawai)
+    {
+        $data = $request->validate([
+            'nama_pegawai' => 'required|string|max:100|unique:pegawais,nama_pegawai,' . $pegawai->id,
+            'jabatan' => 'nullable|string|max:100',
+        ]);
+
+        $pegawai->update($data);
+        return response()->json($pegawai);
+    }
+
     // DELETE /api/pegawais/{pegawai} - khusus admin
     public function destroy(Pegawai $pegawai)
     {
