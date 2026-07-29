@@ -22,6 +22,9 @@ class ScanLog extends Model
         'status_sebelum',
         'is_peminjaman',
         'is_pengembalian',
+        'tanda_tangan',
+        'setuju_ketentuan',
+        'ketentuan_snapshot',
         'scanned_at',
     ];
 
@@ -31,7 +34,20 @@ class ScanLog extends Model
         'longitude' => 'float',
         'is_peminjaman' => 'boolean',
         'is_pengembalian' => 'boolean',
+        'setuju_ketentuan' => 'boolean',
     ];
+
+    // URL lengkap gambar tanda tangan, lewat route /api/tanda-tangan/{path}
+    // (biar dapat header CORS, sama seperti pola foto pada model Asset).
+    protected $appends = ['tanda_tangan_url'];
+
+    public function getTandaTanganUrlAttribute(): ?string
+    {
+        if (!$this->tanda_tangan) {
+            return null;
+        }
+        return url('/api/tanda-tangan/' . $this->tanda_tangan);
+    }
 
     public function asset()
     {

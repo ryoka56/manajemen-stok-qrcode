@@ -8,11 +8,15 @@ use App\Http\Controllers\Api\RuanganController;
 use App\Http\Controllers\Api\KategoriController;
 use App\Http\Controllers\Api\PegawaiController;
 use App\Http\Controllers\Api\StatistikController;
+use App\Http\Controllers\Api\PengaturanController;
 use Illuminate\Support\Facades\Route;
 
 // ---------- Publik ----------
 Route::post('/login', [AuthController::class, 'login']);
 Route::get('/foto/{path}', [AssetController::class, 'tampilkanFoto'])->where('path', '.*');
+// Tanda tangan digital disimpan & dilayani sama persis seperti foto barang
+// (butuh header CORS manual, lihat komentar di AssetController::tampilkanFoto).
+Route::get('/tanda-tangan/{path}', [AssetController::class, 'tampilkanFoto'])->where('path', '.*');
 
 // ---------- Laporan (Excel/PDF) ----------
 // Dibuka lewat browser baru (bukan dari dalam app), jadi tokennya dikirim
@@ -49,6 +53,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/ruangans', [RuanganController::class, 'index']);
     Route::get('/kategoris', [KategoriController::class, 'index']);
     Route::get('/pegawais', [PegawaiController::class, 'index']);
+    // Teks ketentuan/user agreement peminjaman - boleh dibaca admin & petugas
+    Route::get('/pengaturan', [PengaturanController::class, 'show']);
 
     // ---------- Khusus admin ----------
     Route::middleware('admin')->group(function () {
@@ -77,5 +83,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/scan-logs/statistik', [ScanLogController::class, 'statistik']);
         Route::get('/scan-logs/grafik-tahunan', [ScanLogController::class, 'grafikTahunan']);
         Route::get('/scan-logs/grafik', [ScanLogController::class, 'grafik']);
+
+        // Ubah teks ketentuan peminjaman - khusus admin
+        Route::put('/pengaturan', [PengaturanController::class, 'update']);
     });
 });

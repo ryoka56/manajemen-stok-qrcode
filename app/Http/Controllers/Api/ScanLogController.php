@@ -4,8 +4,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Asset;
+use App\Models\Pengaturan;
 use App\Models\ScanLog;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class ScanLogController extends Controller
 {
@@ -51,6 +54,13 @@ class ScanLogController extends Controller
             'nama_peminjam' => 'nullable|string|max:100|required_if:status,dipinjam',
             'catatan' => 'nullable|string',
             'status' => 'nullable|in:tersedia,dipinjam,rusak',
+            // Tanda tangan digital & centang persetujuan ketentuan HANYA wajib
+            // kalau aksi ini membuat status barang jadi 'dipinjam' - sama seperti
+            // aturan nama_peminjam di atas. Dikirim sebagai data URL base64
+            // (hasil ekspor canvas signature pad dari Flutter), bukan file upload
+            // biasa, makanya divalidasi sebagai string, bukan 'image'.
+            'tanda_tangan' => 'nullable|string|required_if:status,dipinjam',
+            'setuju_ketentuan' => 'nullable|boolean|accepted_if:status,dipinjam',
         ]);
 
         $asset = Asset::where('kode_aset', $data['kode_aset'])->firstOrFail();
@@ -79,6 +89,16 @@ class ScanLogController extends Controller
         $isPeminjaman = $statusSebelum !== 'dipinjam' && $statusBaru === 'dipinjam';
         $isPengembalian = $statusSebelum === 'dipinjam' && $statusBaru !== 'dipinjam';
 
+        // Tanda tangan & ketentuan cuma diproses/disimpan kalau aksinya beneran
+        // peminjaman baru. Kalau bukan (mis. sekedar update status rusak),
+        // walaupun field-nya kekirim, sengaja tidak dipakai.
+        $pathTandaTangan = null;
+        $ketentuanSnapshot = null;
+        if ($isPeminjaman && !empty($data['tanda_tangan'])) {
+            $pathTandaTangan = $this->simpanTandaTangan($data['tanda_tangan']);
+            $ketentuanSnapshot = Pengaturan::ambil('deskripsi_persetujuan', '');
+        }
+
         $log = ScanLog::create([
             'asset_id' => $asset->id,
             'user_id' => $user->id,
@@ -92,6 +112,9 @@ class ScanLogController extends Controller
             'status_sebelum' => $statusSebelum,
             'is_peminjaman' => $isPeminjaman,
             'is_pengembalian' => $isPengembalian,
+            'tanda_tangan' => $pathTandaTangan,
+            'setuju_ketentuan' => $isPeminjaman ? (bool) ($data['setuju_ketentuan'] ?? false) : false,
+            'ketentuan_snapshot' => $ketentuanSnapshot,
             'scanned_at' => now(),
         ]);
 
@@ -100,6 +123,22 @@ class ScanLogController extends Controller
         }
 
         return response()->json($log, 201);
+    }
+
+    // Decode data URL base64 (hasil export canvas signature pad Flutter,
+    // format "data:image/png;base64,....") lalu simpan sebagai file PNG
+    // di storage/app/public/tanda-tangan, pola sama seperti foto barang.
+    private function simpanTandaTangan(string $dataUrl): string
+    {
+        if (str_contains($dataUrl, ',')) {
+            $dataUrl = explode(',', $dataUrl, 2)[1];
+        }
+
+        $isi = base64_decode($dataUrl);
+        $namaFile = 'tanda-tangan/' . Str::uuid() . '.png';
+        Storage::disk('public')->put($namaFile, $isi);
+
+        return $namaFile;
     }
 
     // GET /api/scan-logs/peta
