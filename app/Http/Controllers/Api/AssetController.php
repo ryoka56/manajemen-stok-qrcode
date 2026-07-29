@@ -155,13 +155,17 @@ class AssetController extends Controller
     }
 
     // PUT /api/assets/{asset}
+    // Sengaja TIDAK menerima field 'status' di sini. Perubahan status barang
+    // WAJIB lewat POST /scan-logs (proses Scan), karena di situlah tanda
+    // tangan digital + centang ketentuan diwajibkan untuk SETIAP perubahan
+    // status. Kalau status bisa diubah lewat endpoit edit biasa ini, aturan
+    // wajib TTD & ketentuan itu bisa dilewati begitu saja dari Kelola Barang.
     public function update(Request $request, Asset $asset)
     {
         $data = $request->validate([
             'nama_barang' => 'sometimes|string|max:255',
             'kategori' => 'sometimes|string|max:100',
             'deskripsi' => 'nullable|string',
-            'status' => 'sometimes|string|max:50',
         ]);
 
         $asset->update($data);

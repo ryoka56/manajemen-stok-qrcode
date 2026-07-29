@@ -18,6 +18,23 @@ return Application::configure(basePath: dirname(__DIR__))
             'admin' => EnsureUserIsAdmin::class,
             'token.query' => TokenFromQueryString::class,
         ]);
+
+        // PENTING: Laravel punya daftar prioritas middleware internal
+        // (buat middleware bawaan seperti auth) yang menentukan urutan
+        // EKSEKUSI SEBENARNYA - BUKAN urutan literal yang ditulis di array
+        // route group. Tanpa baris ini, 'auth:sanctum' bisa saja tetap
+        // dieksekusi SEBELUM 'token.query', padahal di routes/api.php
+        // 'token.query' ditulis lebih dulu. Akibatnya token dari query
+        // string (?token=...) belum sempat disalin ke header Authorization
+        // saat auth:sanctum mengecek - jadi selalu dianggap belum login
+        // ("Unauthenticated"), walau tokennya valid. Ini penyebab laporan
+        // PDF/Excel gagal diakses (khususnya kalau dibuka user yang bukan
+        // request pertama kena warm code path berbeda).
+        $middleware->priority([
+            TokenFromQueryString::class,
+            \Illuminate\Auth\Middleware\Authenticate::class,
+            EnsureUserIsAdmin::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // Semua request ke /api/* selalu dibalas JSON,
