@@ -61,18 +61,41 @@ class AuthController extends Controller
         return response()->json($request->user());
     }
 
-    // Aturan email: wajib pakai akun Gmail asli yang sudah ada, bukan asal
-    // ketik sembarang alamat (rawan buat keamanan). Kita cek dua lapis:
-    // 1) formatnya harus @gmail.com, 2) domain gmail.com harus punya
-    // record MX yang valid (memastikan itu benar domain email aktif).
+    // Domain email yang diperbolehkan buat daftar/edit akun. Bukan cuma
+    // Gmail - provider besar lain yang beneran ada & terverifikasi juga
+    // diizinkan, tapi TETAP nolak domain asal-asalan/palsu.
+    // Tinggal tambah/hapus item di sini kalau admin mau buka/tutup provider lain.
+    private const DOMAIN_EMAIL_DIIZINKAN = [
+        'gmail.com',
+        'yahoo.com',
+        'yahoo.co.id',
+        'outlook.com',
+        'hotmail.com',
+        'live.com',
+        'icloud.com',
+        'proton.me',
+        'protonmail.com',
+    ];
+
+    // Aturan email: wajib pakai alamat email asli dari provider yang
+    // terverifikasi (bukan asal ketik domain ngawur - rawan buat
+    // keamanan). Dicek dua lapis:
+    // 1) domainnya harus salah satu dari DOMAIN_EMAIL_DIIZINKAN,
+    // 2) 'email:rfc,dns' mastiin domain itu beneran punya record MX aktif
+    //    (jadi bukan cuma formatnya bener, tapi domainnya juga nyata).
     private function aturanEmailGmail(): array
     {
+        $domainPola = implode('|', array_map(
+            fn ($d) => preg_quote($d, '/'),
+            self::DOMAIN_EMAIL_DIIZINKAN
+        ));
+
         return [
             'required',
             'string',
             'email:rfc,dns',
             'max:150',
-            'regex:/^[a-zA-Z0-9._%+-]+@gmail\.com$/i',
+            'regex:/^[a-zA-Z0-9._%+-]+@(' . $domainPola . ')$/i',
         ];
     }
 
@@ -88,8 +111,8 @@ class AuthController extends Controller
     }
 
     private array $pesanValidasiAkun = [
-        'email.regex' => 'Email harus berupa alamat Gmail (@gmail.com) yang valid.',
-        'email.email' => 'Email harus berupa alamat Gmail (@gmail.com) yang valid.',
+        'email.regex' => 'Email harus dari provider yang didukung: Gmail, Yahoo, Outlook, Hotmail, Live, iCloud, atau Proton (mis. nama@gmail.com).',
+        'email.email' => 'Format email tidak valid atau domainnya tidak terdaftar.',
         'password.min' => 'Password minimal 8 karakter.',
         'password.regex' => 'Password minimal 8 karakter dan harus mengandung huruf serta angka.',
     ];
