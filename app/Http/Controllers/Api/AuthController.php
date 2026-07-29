@@ -82,8 +82,14 @@ class AuthController extends Controller
     // terverifikasi (bukan asal ketik domain ngawur - rawan buat
     // keamanan). Dicek dua lapis:
     // 1) domainnya harus salah satu dari DOMAIN_EMAIL_DIIZINKAN,
-    // 2) 'email:rfc,dns' mastiin domain itu beneran punya record MX aktif
-    //    (jadi bukan cuma formatnya bener, tapi domainnya juga nyata).
+    // 2) 'email:rfc,strict,dns,spoof' - beberapa validator email digabung:
+    //    - rfc: format dasar sesuai standar RFC 5322
+    //    - strict: lebih ketat dari rfc biasa (nolak hal aneh kayak titik
+    //      berturut-turut, dsb yang lolos di validator 'rfc' biasa)
+    //    - dns: domainnya harus punya record MX aktif (bukan cuma formatnya
+    //      bener, tapi domainnya juga beneran ada & bisa nerima email)
+    //    - spoof: nolak karakter unicode yang mirip huruf latin (homograph
+    //      attack) - misal "gmail.com" pakai huruf Cyrillic yang keliatan sama
     private function aturanEmailGmail(): array
     {
         $domainPola = implode('|', array_map(
@@ -94,10 +100,38 @@ class AuthController extends Controller
         return [
             'required',
             'string',
-            'email:rfc,dns',
+            'email:rfc,strict,dns,spoof',
             'max:150',
             'regex:/^[a-zA-Z0-9._%+-]+@(' . $domainPola . ')$/i',
         ];
+    }
+
+    // Gmail mengabaikan titik di local-part dan apapun setelah '+' (alias),
+    // jadi "j.ohn.doe@gmail.com", "johndoe@gmail.com", dan
+    // "johndoe+petugas@gmail.com" semuanya nyasar ke kotak masuk yang SAMA.
+    // Tanpa normalisasi ini, satu orang bisa "asal-asalan" bikin banyak akun
+    // yang keliatan beda padahal email tujuannya sama persis - atau
+    // sebaliknya, mengaku pakai email tertentu padahal itu bukan alamat asli
+    // yang dia kontrol penuh. Dipanggil sebelum validasi & sebelum disimpan,
+    // supaya prosesnya konsisten (dicek dg bentuk yang sama, disimpan
+    // dengan bentuk yang sama).
+    private function normalisasiEmail(string $email): string
+    {
+        $email = strtolower(trim($email));
+
+        if (!str_contains($email, '@')) {
+            return $email;
+        }
+
+        [$lokal, $domain] = explode('@', $email, 2);
+
+        if ($domain === 'gmail.com' || $domain === 'googlemail.com') {
+            $lokal = explode('+', $lokal)[0];   // buang alias setelah '+'
+            $lokal = str_replace('.', '', $lokal); // titik diabaikan Gmail
+            $domain = 'gmail.com';
+        }
+
+        return $lokal . '@' . $domain;
     }
 
     // Aturan password: minimal 8 karakter, dan wajib ada huruf & angkanya.
@@ -122,6 +156,10 @@ class AuthController extends Controller
     // Hanya admin yang boleh bikin akun petugas baru
     public function store(Request $request)
     {
+        if ($request->filled('email')) {
+            $request->merge(['email' => $this->normalisasiEmail($request->input('email'))]);
+        }
+
         $data = $request->validate([
             'name' => 'required|string|max:100',
             'email' => array_merge($this->aturanEmailGmail(), ['unique:users,email']),
@@ -150,6 +188,10 @@ class AuthController extends Controller
     // Edit akun (nama, email, role, opsional ganti password) - khusus admin
     public function update(Request $request, User $user)
     {
+        if ($request->filled('email')) {
+            $request->merge(['email' => $this->normalisasiEmail($request->input('email'))]);
+        }
+
         $data = $request->validate([
             'name' => 'required|string|max:100',
             'email' => array_merge($this->aturanEmailGmail(), ['unique:users,email,' . $user->id]),
