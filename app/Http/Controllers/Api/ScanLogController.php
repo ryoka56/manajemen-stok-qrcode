@@ -51,7 +51,7 @@ class ScanLogController extends Controller
             // Nama peminjam cuma WAJIB diisi kalau aksi ini bikin status
             // jadi 'dipinjam'. Kalau lagi mengembalikan/status lain, boleh
             // kosong - gak masuk akal nanya "siapa peminjam" pas ngembaliin.
-            'nama_peminjam' => 'nullable|string|max:100|required_if:status,dipinjam',
+            'nama_peminjam' => 'required|string|max:100',
             'catatan' => 'nullable|string',
             'status' => 'nullable|in:tersedia,dipinjam,rusak',
             // Tanda tangan digital & centang persetujuan ketentuan sekarang WAJIB

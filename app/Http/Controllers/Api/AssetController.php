@@ -154,18 +154,18 @@ class AssetController extends Controller
         return response()->json($asset->load(['scanLogs', 'lokasiTerakhir']));
     }
 
-    // PUT /api/assets/{asset}
-    // Sengaja TIDAK menerima field 'status' di sini. Perubahan status barang
-    // WAJIB lewat POST /scan-logs (proses Scan), karena di situlah tanda
-    // tangan digital + centang ketentuan diwajibkan untuk SETIAP perubahan
-    // status. Kalau status bisa diubah lewat endpoit edit biasa ini, aturan
-    // wajib TTD & ketentuan itu bisa dilewati begitu saja dari Kelola Barang.
+    // PUT /api/assets/{asset} - khusus admin (lihat middleware route).
+    // Admin boleh ubah status langsung dari sini (override manual), beda
+    // dengan alur Scan (POST /scan-logs) yang wajib TTD + centang ketentuan
+    // untuk petugas. Perubahan lewat sini TIDAK membuat ScanLog baru,
+    // jadi tidak tercatat di riwayat lokasi/TTD - cuma buat koreksi cepat.
     public function update(Request $request, Asset $asset)
     {
         $data = $request->validate([
             'nama_barang' => 'sometimes|string|max:255',
             'kategori' => 'sometimes|string|max:100',
             'deskripsi' => 'nullable|string',
+            'status' => 'sometimes|in:tersedia,dipinjam,rusak',
         ]);
 
         $asset->update($data);
