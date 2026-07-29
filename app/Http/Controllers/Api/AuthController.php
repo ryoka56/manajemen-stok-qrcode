@@ -74,6 +74,7 @@ class AuthController extends Controller
         'live.com',
         'icloud.com',
         'proton.me',
+        'komdigi.go.id',
         'protonmail.com',
     ];
 
