@@ -33,21 +33,6 @@ class Asset extends Model
         return $this->hasOne(ScanLog::class)->latestOfMany('scanned_at');
     }
 
-    // Foto AKTIF paling baru dari riwayat scan petugas (bukan foto_1/2/3
-    // yang diupload admin lewat Kelola Barang - ini beda sumber). "Aktif"
-    // artinya admin belum menonaktifkannya (lihat kolom foto_aktif di
-    // ScanLog). Kalau foto terbaru dinonaktifkan admin, otomatis jatuh ke
-    // foto aktif sebelumnya (bukan langsung kosong) - itu makanya query-nya
-    // MAX(scanned_at) dengan filter foto_aktif=true, bukan cuma "scan
-    // terakhir" biasa.
-    public function fotoScanTerbaru()
-    {
-        return $this->hasOne(ScanLog::class)
-            ->ofMany('scanned_at', 'max', function ($query) {
-                $query->whereNotNull('foto')->where('foto_aktif', true);
-            });
-    }
-
     // Nama peminjam SAAT INI - cuma terisi kalau status barang = dipinjam.
     // Ambil dari nama_peminjam di scan terakhir (karena status jadi 'dipinjam'
     // itu justru DI-SET oleh scan itu sendiri, jadi log terakhir = aksi pinjam
@@ -64,11 +49,27 @@ class Asset extends Model
             : $this->lokasiTerakhir()->first()?->nama_peminjam;
     }
 
+    // Foto AKTIF paling baru dari riwayat scan petugas (bukan foto_1/2/3
+    // yang diupload admin lewat Kelola Barang - beda sumber). "Aktif"
+    // artinya admin belum menonaktifkannya (kolom foto_aktif di ScanLog).
+    // Kalau foto terbaru dinonaktifkan admin, otomatis jatuh ke foto aktif
+    // sebelumnya (bukan langsung kosong).
+    //
+    // CATATAN: sengaja query langsung di sini (bukan relasi Eloquent
+    // hasOne->ofMany), karena eager-load dua relasi "ofMany" ke tabel yang
+    // SAMA (scan_logs) sekaligus - lokasiTerakhir() dan yang ini kalau
+    // dibikin relasi - berisiko bentrok alias SQL di beberapa versi
+    // Laravel dan bikin request gagal (500). Query manual biar 100% aman,
+    // dengan sedikit trade-off: 1 query kecil per barang (bukan eager
+    // loaded), tapi index(scanLogs.asset_id, scanned_at) yang sudah
+    // ditambahkan sebelumnya bikin query ini tetap ngebut.
     public function getFotoScanUrlAttribute(): ?string
     {
-        $log = $this->relationLoaded('fotoScanTerbaru')
-            ? $this->fotoScanTerbaru
-            : $this->fotoScanTerbaru()->first();
+        $log = ScanLog::where('asset_id', $this->id)
+            ->whereNotNull('foto')
+            ->where('foto_aktif', true)
+            ->orderByDesc('scanned_at')
+            ->first();
 
         return $log?->foto_url;
     }
