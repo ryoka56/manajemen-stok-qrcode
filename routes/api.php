@@ -20,11 +20,14 @@ Route::get('/tanda-tangan/{path}', [AssetController::class, 'tampilkanFoto'])->w
 
 // ---------- Laporan (Excel/PDF) ----------
 // Dibuka lewat browser baru (bukan dari dalam app), jadi tokennya dikirim
-// lewat query string (?token=...), makanya middleware 'token.query' harus
-// jalan LEBIH DULU sebelum 'auth:sanctum' supaya headernya sempat disalin.
+// lewat query string (?token=...). Middleware 'token.query' sekarang
+// memvalidasi token itu SENDIRI (lihat komentar di TokenFromQueryString),
+// jadi tidak perlu 'auth:sanctum' lagi di sini - malah bisa bentrok karena
+// guard-nya beda (auth:sanctum spesifik guard 'sanctum', sedangkan
+// TokenFromQueryString set user di guard default).
 // Sengaja TIDAK dibatasi 'admin' - tombol export ada juga di layar petugas
 // (home_screen.dart), jadi siapa saja yang sudah login boleh mengunduh.
-Route::middleware(['token.query', 'auth:sanctum'])->group(function () {
+Route::middleware(['token.query'])->group(function () {
     Route::get('/reports/excel', [ReportController::class, 'exportExcel']);
     Route::get('/reports/pdf', [ReportController::class, 'exportPdf']);
 });
@@ -57,6 +60,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/pegawais', [PegawaiController::class, 'index']);
     // Teks ketentuan/user agreement peminjaman - boleh dibaca admin & petugas
     Route::get('/pengaturan', [PengaturanController::class, 'show']);
+    // Daftar domain email yang diizinkan - dipakai buat validasi form Kelola Akun
+    Route::get('/pengaturan/domain-email', [PengaturanController::class, 'domainEmail']);
 
     // ---------- Khusus admin ----------
     Route::middleware('admin')->group(function () {
@@ -88,5 +93,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Ubah teks ketentuan peminjaman - khusus admin
         Route::put('/pengaturan', [PengaturanController::class, 'update']);
+        // Kelola daftar domain email yang diizinkan - khusus admin
+        Route::post('/pengaturan/domain-email', [PengaturanController::class, 'tambahDomainEmail']);
+        Route::delete('/pengaturan/domain-email', [PengaturanController::class, 'hapusDomainEmail']);
     });
 });
