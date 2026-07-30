@@ -65,42 +65,35 @@ class AuthController extends Controller
     // Gmail - provider besar lain yang beneran ada & terverifikasi juga
     // diizinkan, tapi TETAP nolak domain asal-asalan/palsu.
     // Tinggal tambah/hapus item di sini kalau admin mau buka/tutup provider lain.
-    private const DOMAIN_EMAIL_DIIZINKAN = [
-        'gmail.com',
-        'yahoo.com',
-        'yahoo.co.id',
-        'outlook.com',
-        'hotmail.com',
-        'live.com',
-        'icloud.com',
-        'proton.me',
-        'komdigi.go.id',
-        'protonmail.com',
-    ];
+    // Dulu daftar domain di sini hardcoded (const). Sekarang diambil dinamis
+    // dari tabel pengaturans lewat PengaturanController::daftarDomainEmail(),
+    // supaya admin bisa nambah/hapus domain sendiri lewat Pengaturan >
+    // Domain Email, tanpa perlu ubah kode & deploy ulang.
 
     // Aturan email: wajib pakai alamat email asli dari provider yang
     // terverifikasi (bukan asal ketik domain ngawur - rawan buat
     // keamanan). Dicek dua lapis:
     // 1) domainnya harus salah satu dari DOMAIN_EMAIL_DIIZINKAN,
-    // 2) 'email:rfc,strict,dns,spoof' - beberapa validator email digabung:
+    // 2) 'email:rfc,strict,dns' - beberapa validator email digabung:
     //    - rfc: format dasar sesuai standar RFC 5322
     //    - strict: lebih ketat dari rfc biasa (nolak hal aneh kayak titik
     //      berturut-turut, dsb yang lolos di validator 'rfc' biasa)
     //    - dns: domainnya harus punya record MX aktif (bukan cuma formatnya
     //      bener, tapi domainnya juga beneran ada & bisa nerima email)
-    //    - spoof: nolak karakter unicode yang mirip huruf latin (homograph
-    //      attack) - misal "gmail.com" pakai huruf Cyrillic yang keliatan sama
+    //    Sengaja TIDAK pakai validator 'spoof' - itu butuh ekstensi PHP
+    //    'intl' yang belum aktif di server (Railway), dan kalau dipaksa
+    //    malah bikin exception 500 setiap kali nambah/edit akun.
     private function aturanEmailGmail(): array
     {
         $domainPola = implode('|', array_map(
             fn ($d) => preg_quote($d, '/'),
-            self::DOMAIN_EMAIL_DIIZINKAN
+            PengaturanController::daftarDomainEmail()
         ));
 
         return [
             'required',
             'string',
-            'email:rfc,strict,dns,spoof',
+            'email:rfc,strict,dns',
             'max:150',
             'regex:/^[a-zA-Z0-9._%+-]+@(' . $domainPola . ')$/i',
         ];
@@ -146,7 +139,7 @@ class AuthController extends Controller
     }
 
     private array $pesanValidasiAkun = [
-        'email.regex' => 'Email harus dari provider yang didukung: Gmail, Yahoo, Outlook, Hotmail, Live, iCloud, atau Proton (mis. nama@gmail.com).',
+        'email.regex' => 'Domain email ini tidak diizinkan. Cek daftar domain yang didukung di menu Pengaturan.',
         'email.email' => 'Format email tidak valid atau domainnya tidak terdaftar.',
         'password.min' => 'Password minimal 8 karakter.',
         'password.regex' => 'Password minimal 8 karakter dan harus mengandung huruf serta angka.',
