@@ -60,8 +60,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/pegawais', [PegawaiController::class, 'index']);
     // Teks ketentuan/user agreement peminjaman - boleh dibaca admin & petugas
     Route::get('/pengaturan', [PengaturanController::class, 'show']);
-    // Daftar domain email yang diizinkan - dipakai buat validasi form Kelola Akun
-    Route::get('/pengaturan/domain-email', [PengaturanController::class, 'domainEmail']);
 
     // ---------- Khusus admin ----------
     Route::middleware('admin')->group(function () {
@@ -93,8 +91,5 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Ubah teks ketentuan peminjaman - khusus admin
         Route::put('/pengaturan', [PengaturanController::class, 'update']);
-        // Kelola daftar domain email yang diizinkan - khusus admin
-        Route::post('/pengaturan/domain-email', [PengaturanController::class, 'tambahDomainEmail']);
-        Route::delete('/pengaturan/domain-email', [PengaturanController::class, 'hapusDomainEmail']);
     });
 });

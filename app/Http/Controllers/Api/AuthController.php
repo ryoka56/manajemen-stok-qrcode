@@ -64,11 +64,22 @@ class AuthController extends Controller
     // Domain email yang diperbolehkan buat daftar/edit akun. Bukan cuma
     // Gmail - provider besar lain yang beneran ada & terverifikasi juga
     // diizinkan, tapi TETAP nolak domain asal-asalan/palsu.
-    // Tinggal tambah/hapus item di sini kalau admin mau buka/tutup provider lain.
-    // Dulu daftar domain di sini hardcoded (const). Sekarang diambil dinamis
-    // dari tabel pengaturans lewat PengaturanController::daftarDomainEmail(),
-    // supaya admin bisa nambah/hapus domain sendiri lewat Pengaturan >
-    // Domain Email, tanpa perlu ubah kode & deploy ulang.
+    // Tinggal tambah/hapus item di sini kalau admin mau buka/tutup provider
+    // lain. Daftarnya HARUS disamakan dengan _domainEmailDiizinkan di
+    // pengaturan_screen.dart (Flutter) - dua-duanya validasi email yang sama,
+    // cuma satu di server (wajib dipatuhi) satu di client (feedback cepat).
+    private const DOMAIN_EMAIL_DIIZINKAN = [
+        'gmail.com',
+        'yahoo.com',
+        'yahoo.co.id',
+        'outlook.com',
+        'hotmail.com',
+        'live.com',
+        'icloud.com',
+        'komdigi.go.id',
+        'proton.me',
+        'protonmail.com',
+    ];
 
     // Aturan email: wajib pakai alamat email asli dari provider yang
     // terverifikasi (bukan asal ketik domain ngawur - rawan buat
@@ -87,7 +98,7 @@ class AuthController extends Controller
     {
         $domainPola = implode('|', array_map(
             fn ($d) => preg_quote($d, '/'),
-            PengaturanController::daftarDomainEmail()
+            self::DOMAIN_EMAIL_DIIZINKAN
         ));
 
         return [
