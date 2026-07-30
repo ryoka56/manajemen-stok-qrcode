@@ -33,11 +33,26 @@ class Asset extends Model
         return $this->hasOne(ScanLog::class)->latestOfMany('scanned_at');
     }
 
+    // Foto AKTIF paling baru dari riwayat scan petugas (bukan foto_1/2/3
+    // yang diupload admin lewat Kelola Barang - ini beda sumber). "Aktif"
+    // artinya admin belum menonaktifkannya (lihat kolom foto_aktif di
+    // ScanLog). Kalau foto terbaru dinonaktifkan admin, otomatis jatuh ke
+    // foto aktif sebelumnya (bukan langsung kosong) - itu makanya query-nya
+    // MAX(scanned_at) dengan filter foto_aktif=true, bukan cuma "scan
+    // terakhir" biasa.
+    public function fotoScanTerbaru()
+    {
+        return $this->hasOne(ScanLog::class)
+            ->ofMany('scanned_at', 'max', function ($query) {
+                $query->whereNotNull('foto')->where('foto_aktif', true);
+            });
+    }
+
     // Nama peminjam SAAT INI - cuma terisi kalau status barang = dipinjam.
     // Ambil dari nama_peminjam di scan terakhir (karena status jadi 'dipinjam'
     // itu justru DI-SET oleh scan itu sendiri, jadi log terakhir = aksi pinjam
     // yang bikin status jadi begini). Gak perlu kolom baru di tabel assets.
-    protected $appends = ['peminjam_saat_ini', 'foto_urls'];
+    protected $appends = ['peminjam_saat_ini', 'foto_urls', 'foto_scan_url'];
 
     public function getPeminjamSaatIniAttribute()
     {
@@ -47,6 +62,15 @@ class Asset extends Model
         return $this->relationLoaded('lokasiTerakhir')
             ? $this->lokasiTerakhir?->nama_peminjam
             : $this->lokasiTerakhir()->first()?->nama_peminjam;
+    }
+
+    public function getFotoScanUrlAttribute(): ?string
+    {
+        $log = $this->relationLoaded('fotoScanTerbaru')
+            ? $this->fotoScanTerbaru
+            : $this->fotoScanTerbaru()->first();
+
+        return $log?->foto_url;
     }
 
     // URL publik lengkap buat tiap slot foto (null kalau slot itu kosong).

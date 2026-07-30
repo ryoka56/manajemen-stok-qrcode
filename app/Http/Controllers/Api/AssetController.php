@@ -15,7 +15,7 @@ class AssetController extends Controller
     // ?ruangan= (filter ruangan/rak asal), ?page= & ?per_page= (paginasi)
     public function index(Request $request)
     {
-        $query = Asset::with('lokasiTerakhir');
+        $query = Asset::with(['lokasiTerakhir', 'fotoScanTerbaru']);
 
         if ($request->filled('kategori')) {
             $query->where('kategori', $request->kategori);
@@ -252,7 +252,7 @@ class AssetController extends Controller
     public function scan($kode_aset)
     {
         $asset = Asset::where('kode_aset', $kode_aset)
-            ->with(['lokasiTerakhir', 'scanLogs' => fn ($q) => $q->latest('scanned_at')->limit(5)])
+            ->with(['lokasiTerakhir', 'fotoScanTerbaru', 'scanLogs' => fn ($q) => $q->latest('scanned_at')->limit(5)])
             ->firstOrFail();
 
         return response()->json($asset);

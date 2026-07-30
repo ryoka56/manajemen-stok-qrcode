@@ -88,6 +88,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/scan-logs/statistik', [ScanLogController::class, 'statistik']);
         Route::get('/scan-logs/grafik-tahunan', [ScanLogController::class, 'grafikTahunan']);
         Route::get('/scan-logs/grafik', [ScanLogController::class, 'grafik']);
+        // Kelola foto hasil scan petugas - khusus admin
+        Route::put('/scan-logs/{scanLog}/foto', [ScanLogController::class, 'toggleFoto']);
+        Route::delete('/scan-logs/{scanLog}/foto', [ScanLogController::class, 'hapusFoto']);
 
         // Ubah teks ketentuan peminjaman - khusus admin
         Route::put('/pengaturan', [PengaturanController::class, 'update']);

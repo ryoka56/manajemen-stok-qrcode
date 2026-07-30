@@ -61,6 +61,11 @@ class ScanLogController extends Controller
             // bukan 'image'.
             'tanda_tangan' => 'required|string',
             'setuju_ketentuan' => 'required|boolean|accepted',
+            // Foto OPSIONAL - petugas boleh gak upload apa-apa. Sama seperti
+            // tanda_tangan, dikirim sebagai data URL base64 (hasil dari
+            // image_picker di Flutter yang di-encode dulu), bukan file
+            // upload multipart biasa, jadi validasinya string.
+            'foto' => 'nullable|string',
         ]);
 
         $asset = Asset::where('kode_aset', $data['kode_aset'])->firstOrFail();
@@ -95,6 +100,10 @@ class ScanLogController extends Controller
         $pathTandaTangan = $this->simpanTandaTangan($data['tanda_tangan']);
         $ketentuanSnapshot = Pengaturan::ambil('deskripsi_persetujuan', '');
 
+        // Foto opsional - kalau petugas gak upload apa-apa, kolomnya tetap
+        // null (bukan wajib, beda dengan tanda tangan & ketentuan).
+        $pathFoto = !empty($data['foto']) ? $this->simpanFoto($data['foto']) : null;
+
         $log = ScanLog::create([
             'asset_id' => $asset->id,
             'user_id' => $user->id,
@@ -111,6 +120,8 @@ class ScanLogController extends Controller
             'tanda_tangan' => $pathTandaTangan,
             'setuju_ketentuan' => (bool) $data['setuju_ketentuan'],
             'ketentuan_snapshot' => $ketentuanSnapshot,
+            'foto' => $pathFoto,
+            'foto_aktif' => true,
             'scanned_at' => now(),
         ]);
 
@@ -135,6 +146,57 @@ class ScanLogController extends Controller
         Storage::disk('public')->put($namaFile, $isi);
 
         return $namaFile;
+    }
+
+    // Sama persis pola simpanTandaTangan() - decode data URL base64 lalu
+    // simpan sebagai file. Folder beda ('scan-foto') biar gampang dibedain
+    // pas lihat langsung ke storage, tapi tetap dilayani lewat route
+    // /api/foto/{path} yang sama (route itu generik, gak peduli foldernya).
+    private function simpanFoto(string $dataUrl): string
+    {
+        if (str_contains($dataUrl, ',')) {
+            $dataUrl = explode(',', $dataUrl, 2)[1];
+        }
+
+        $isi = base64_decode($dataUrl);
+        $namaFile = 'scan-foto/' . Str::uuid() . '.jpg';
+        Storage::disk('public')->put($namaFile, $isi);
+
+        return $namaFile;
+    }
+
+    // PUT /api/scan-logs/{scanLog}/foto - khusus admin
+    // Nyalain/matiin foto ini TANPA menghapus filenya. Dipakai admin buat
+    // nyembunyiin foto yang gak pantas/salah dari tampilan barang, tapi
+    // tetap nyimpen jejaknya buat riwayat (siapa tau perlu ditinjau lagi).
+    public function toggleFoto(Request $request, ScanLog $scanLog)
+    {
+        if (!$scanLog->foto) {
+            return response()->json(['message' => 'Scan log ini tidak punya foto.'], 422);
+        }
+
+        $data = $request->validate(['aktif' => 'required|boolean']);
+
+        $scanLog->update(['foto_aktif' => $data['aktif']]);
+
+        return response()->json($scanLog->fresh());
+    }
+
+    // DELETE /api/scan-logs/{scanLog}/foto - khusus admin
+    // Beda dengan toggle di atas - ini BENERAN hapus filenya secara
+    // permanen (gak bisa dipulihkan). Baris ScanLog-nya sendiri tetap ada
+    // (riwayat lokasi/tanda tangan/dll di baris itu tidak ikut hilang),
+    // cuma bagian foto-nya yang dibersihkan.
+    public function hapusFoto(ScanLog $scanLog)
+    {
+        if (!$scanLog->foto) {
+            return response()->json(['message' => 'Scan log ini tidak punya foto.'], 422);
+        }
+
+        Storage::disk('public')->delete($scanLog->foto);
+        $scanLog->update(['foto' => null, 'foto_aktif' => true]);
+
+        return response()->json(['message' => 'Foto berhasil dihapus permanen.']);
     }
 
     // GET /api/scan-logs/peta
