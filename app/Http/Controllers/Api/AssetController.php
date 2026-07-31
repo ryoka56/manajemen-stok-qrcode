@@ -11,8 +11,9 @@ use SimpleSoftwareIO\QrCode\Facades\QrCode;
 class AssetController extends Controller
 {
     // GET /api/assets
-    // Mendukung: ?cari= (nama barang), ?kategori= (filter kategori),
-    // ?ruangan= (filter ruangan/rak asal), ?page= & ?per_page= (paginasi)
+    // Mendukung: ?cari= (nama barang ATAU kode aset - case-insensitive),
+    // ?kategori= (filter kategori), ?ruangan= (filter ruangan/rak asal),
+    // ?page= & ?per_page= (paginasi)
     public function index(Request $request)
     {
         $query = Asset::with('lokasiTerakhir');
@@ -24,7 +25,17 @@ class AssetController extends Controller
             $query->where('ruangan_asal', $request->ruangan);
         }
         if ($request->filled('cari')) {
-            $query->where('nama_barang', 'like', '%' . $request->cari . '%');
+            // Dicari di DUA kolom sekaligus: nama_barang & kode_aset. Dipaksa
+            // pakai LOWER() di kedua sisi (kolom & inputnya) biar
+            // case-insensitive PASTI jalan apapun collation kolomnya di
+            // database (kalau kolomnya kebetulan collation case-sensitive
+            // seperti *_bin atau *_cs, LIKE biasa bakal miss "ast-0001" vs
+            // "AST-0001" - LOWER() menghindari ketergantungan itu).
+            $kata = '%' . strtolower($request->cari) . '%';
+            $query->where(function ($q) use ($kata) {
+                $q->whereRaw('LOWER(nama_barang) LIKE ?', [$kata])
+                  ->orWhereRaw('LOWER(kode_aset) LIKE ?', [$kata]);
+            });
         }
 
         // per_page dibatasi max 100 supaya tidak disalahgunakan buat narik semua data sekaligus
