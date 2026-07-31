@@ -37,7 +37,7 @@ class Asset extends Model
     // Ambil dari nama_peminjam di scan terakhir (karena status jadi 'dipinjam'
     // itu justru DI-SET oleh scan itu sendiri, jadi log terakhir = aksi pinjam
     // yang bikin status jadi begini). Gak perlu kolom baru di tabel assets.
-    protected $appends = ['peminjam_saat_ini', 'foto_urls', 'foto_scan_url'];
+    protected $appends = ['peminjam_saat_ini', 'foto_urls', 'foto_scan_url', 'foto_slot_info'];
 
     public function getPeminjamSaatIniAttribute()
     {
@@ -49,20 +49,9 @@ class Asset extends Model
             : $this->lokasiTerakhir()->first()?->nama_peminjam;
     }
 
-    // Foto AKTIF paling baru dari riwayat scan petugas (bukan foto_1/2/3
-    // yang diupload admin lewat Kelola Barang - beda sumber). "Aktif"
-    // artinya admin belum menonaktifkannya (kolom foto_aktif di ScanLog).
-    // Kalau foto terbaru dinonaktifkan admin, otomatis jatuh ke foto aktif
-    // sebelumnya (bukan langsung kosong).
-    //
-    // CATATAN: sengaja query langsung di sini (bukan relasi Eloquent
-    // hasOne->ofMany), karena eager-load dua relasi "ofMany" ke tabel yang
-    // SAMA (scan_logs) sekaligus - lokasiTerakhir() dan yang ini kalau
-    // dibikin relasi - berisiko bentrok alias SQL di beberapa versi
-    // Laravel dan bikin request gagal (500). Query manual biar 100% aman,
-    // dengan sedikit trade-off: 1 query kecil per barang (bukan eager
-    // loaded), tapi index(scanLogs.asset_id, scanned_at) yang sudah
-    // ditambahkan sebelumnya bikin query ini tetap ngebut.
+    // Foto AKTIF paling baru dari riwayat scan petugas, TANPA peduli slot -
+    // dipakai buat panel ringkas "Foto dari Petugas" di Kelola Barang.
+    // Beda dengan getFotoUrlsAttribute() di bawah yang integrasinya per-slot.
     public function getFotoScanUrlAttribute(): ?string
     {
         $log = ScanLog::where('asset_id', $this->id)
@@ -74,10 +63,32 @@ class Asset extends Model
         return $log?->foto_url;
     }
 
+    // Ambil scan_log AKTIF terbaru buat tiap slot (1,2,3) yang punya foto -
+    // dipakai bareng oleh getFotoUrlsAttribute() & getFotoSlotInfoAttribute()
+    // biar gak dobel query. Key = nomor slot, value = ScanLog.
+    private function overridePetugasPerSlot(): array
+    {
+        return ScanLog::where('asset_id', $this->id)
+            ->whereNotNull('slot')
+            ->whereNotNull('foto')
+            ->where('foto_aktif', true)
+            ->orderByDesc('scanned_at')
+            ->get()
+            ->groupBy('slot')
+            ->map(fn ($grup) => $grup->first()) // udah urut terbaru dulu -> ambil yang paling baru per slot
+            ->all();
+    }
+
     // URL publik lengkap buat tiap slot foto (null kalau slot itu kosong).
     // Kolom database cuma nyimpen path relatif (mis. "asset-photos/xxx.jpg"),
     // jadi Flutter butuh URL lengkap buat nampilin gambarnya.
-    // URL publik lengkap buat tiap slot foto (null kalau slot itu kosong).
+    //
+    // Tiap slot dicek DULU apakah ada foto AKTIF dari petugas yang lagi
+    // "menempati" slot itu (lihat overridePetugasPerSlot()) - kalau ada,
+    // itu yang ditampilkan. Kalau gak ada (belum pernah ditempati petugas,
+    // atau lagi dinonaktifkan admin), baru fallback ke foto ASLI slot itu
+    // (assets.foto_1/2/3 - yang gak pernah kesentuh/ketimpa oleh proses ini).
+    //
     // Diarahkan ke route /api/foto/{path} (lewat kode Laravel, bukan file
     // statis langsung), biar responsenya bisa dikasih header CORS -
     // dibutuhkan Flutter Web yang ngambil gambar pakai fetch/XHR, bukan
@@ -86,11 +97,33 @@ class Asset extends Model
     public function getFotoUrlsAttribute()
     {
         $buat = fn ($path) => $path ? url('/api/foto/' . ltrim($path, '/')) : null;
+        $override = $this->overridePetugasPerSlot();
 
         return [
-            'foto_1' => $buat($this->foto_1),
-            'foto_2' => $buat($this->foto_2),
-            'foto_3' => $buat($this->foto_3),
+            'foto_1' => isset($override[1]) ? $override[1]->foto_url : $buat($this->foto_1),
+            'foto_2' => isset($override[2]) ? $override[2]->foto_url : $buat($this->foto_2),
+            'foto_3' => isset($override[3]) ? $override[3]->foto_url : $buat($this->foto_3),
         ];
+    }
+
+    // Info tambahan per slot: apakah slot itu lagi ditempati foto petugas
+    // (bukan foto asli), dan kapan diupload - dipakai frontend buat nampilin
+    // badge "Dari petugas • [tanggal]" di grid foto Kelola Barang.
+    public function getFotoSlotInfoAttribute()
+    {
+        $override = $this->overridePetugasPerSlot();
+
+        $buat = function (int $slot) use ($override) {
+            if (isset($override[$slot])) {
+                return [
+                    'dari_petugas' => true,
+                    'diupload_pada' => $override[$slot]->scanned_at,
+                    'scan_log_id' => $override[$slot]->id,
+                ];
+            }
+            return ['dari_petugas' => false, 'diupload_pada' => null, 'scan_log_id' => null];
+        };
+
+        return ['foto_1' => $buat(1), 'foto_2' => $buat(2), 'foto_3' => $buat(3)];
     }
 }

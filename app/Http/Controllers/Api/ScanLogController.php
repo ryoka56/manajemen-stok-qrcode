@@ -102,7 +102,27 @@ class ScanLogController extends Controller
 
         // Foto opsional - kalau petugas gak upload apa-apa, kolomnya tetap
         // null (bukan wajib, beda dengan tanda tangan & ketentuan).
-        $pathFoto = !empty($data['foto']) ? $this->simpanFoto($data['foto']) : null;
+        //
+        // Kalau ADA foto, dia harus "menempati" salah satu dari 3 slot foto
+        // barang (assets.foto_1/2/3 - sama slot yang dipakai admin di Kelola
+        // Barang). Dicek slot mana yang masih kosong DULU, sebelum file-nya
+        // beneran disimpan - kalau ternyata udah 3/3 penuh, seluruh
+        // permintaan scan ini ditolak (bukan cuma bagian fotonya doang),
+        // dengan pesan jelas suruh hapus salah satu foto lama dulu. Ini
+        // sengaja dicek sebelum simpanFoto() dipanggil, biar gak nyampah
+        // file yang ujung-ujungnya ditolak juga.
+        $pathFoto = null;
+        $slotFoto = null;
+        if (!empty($data['foto'])) {
+            $slotFoto = $this->slotKosongBerikutnya($asset);
+            if ($slotFoto === null) {
+                return response()->json([
+                    'message' => 'Slot foto barang ini sudah penuh (3/3). Hapus salah satu foto '
+                        . 'lama dulu (lewat Kelola Barang) sebelum menambah foto baru.',
+                ], 422);
+            }
+            $pathFoto = $this->simpanFoto($data['foto']);
+        }
 
         $log = ScanLog::create([
             'asset_id' => $asset->id,
@@ -122,6 +142,7 @@ class ScanLogController extends Controller
             'ketentuan_snapshot' => $ketentuanSnapshot,
             'foto' => $pathFoto,
             'foto_aktif' => true,
+            'slot' => $slotFoto,
             'scanned_at' => now(),
         ]);
 
@@ -130,6 +151,29 @@ class ScanLogController extends Controller
         }
 
         return response()->json($log, 201);
+    }
+
+    // Cari slot foto (1, 2, atau 3) yang masih kosong buat barang ini.
+    // "Kosong" artinya: foto ASLI di kolom itu (assets.foto_N) belum diisi,
+    // DAN belum ada foto petugas yang lagi aktif menempati slot itu.
+    // Slot dicek berurutan 1 -> 2 -> 3, dipakai yang pertama kosong.
+    // Return null kalau ketiga-tiganya sudah terisi (gak ada slot kosong).
+    private function slotKosongBerikutnya(Asset $asset): ?int
+    {
+        for ($slot = 1; $slot <= 3; $slot++) {
+            $fotoAsli = $asset->{"foto_$slot"};
+            $adaOverridePetugas = ScanLog::where('asset_id', $asset->id)
+                ->where('slot', $slot)
+                ->whereNotNull('foto')
+                ->where('foto_aktif', true)
+                ->exists();
+
+            if (!$fotoAsli && !$adaOverridePetugas) {
+                return $slot;
+            }
+        }
+
+        return null;
     }
 
     // Decode data URL base64 (hasil export canvas signature pad Flutter,
@@ -194,7 +238,7 @@ class ScanLogController extends Controller
         }
 
         Storage::disk('public')->delete($scanLog->foto);
-        $scanLog->update(['foto' => null, 'foto_aktif' => true]);
+        $scanLog->update(['foto' => null, 'foto_aktif' => true, 'slot' => null]);
 
         return response()->json(['message' => 'Foto berhasil dihapus permanen.']);
     }

@@ -27,6 +27,7 @@ class ScanLog extends Model
         'ketentuan_snapshot',
         'foto',
         'foto_aktif',
+        'slot',
         'scanned_at',
     ];
 
