@@ -20,6 +20,8 @@ class ScanLog extends Model
         'catatan',
         'status_saat_itu',
         'status_sebelum',
+        'kondisi_saat_itu',
+        'kondisi_sebelum',
         'is_peminjaman',
         'is_pengembalian',
         'tanda_tangan',
