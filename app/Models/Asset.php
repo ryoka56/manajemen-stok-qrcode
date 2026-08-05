@@ -17,14 +17,43 @@ class Asset extends Model
         'deskripsi',
         'ruangan_asal',
         'status',
+        'kondisi',
         'foto_1',
+        'foto_1_oleh',
+        'foto_1_pada',
         'foto_2',
+        'foto_2_oleh',
+        'foto_2_pada',
         'foto_3',
+        'foto_3_oleh',
+        'foto_3_pada',
+    ];
+
+    protected $casts = [
+        'foto_1_pada' => 'datetime',
+        'foto_2_pada' => 'datetime',
+        'foto_3_pada' => 'datetime',
     ];
 
     public function scanLogs()
     {
         return $this->hasMany(ScanLog::class);
+    }
+
+    // Usulan perubahan (dari petugas) yang MASIH menunggu ACC admin untuk
+    // barang ini - dipakai buat badge "Ada perubahan menunggu ACC" di daftar
+    // barang. hasOne + latestOfMany, sama pola dengan lokasiTerakhir() di
+    // bawah, supaya aman dari N+1 waktu di-eager-load lewat with().
+    public function perubahanTertunda()
+    {
+        return $this->hasOne(AssetPerubahan::class)->where('status', 'menunggu')->latestOfMany();
+    }
+
+    public function getPunyaPerubahanTertundaAttribute(): bool
+    {
+        return $this->relationLoaded('perubahanTertunda')
+            ? $this->perubahanTertunda !== null
+            : $this->perubahanTertunda()->exists();
     }
 
     // lokasi terakhir tercatat (berdasarkan scan terbaru)
@@ -37,7 +66,7 @@ class Asset extends Model
     // Ambil dari nama_peminjam di scan terakhir (karena status jadi 'dipinjam'
     // itu justru DI-SET oleh scan itu sendiri, jadi log terakhir = aksi pinjam
     // yang bikin status jadi begini). Gak perlu kolom baru di tabel assets.
-    protected $appends = ['peminjam_saat_ini', 'foto_urls', 'foto_scan_url', 'foto_slot_info'];
+    protected $appends = ['peminjam_saat_ini', 'foto_urls', 'foto_scan_url', 'foto_slot_info', 'punya_perubahan_tertunda'];
 
     public function getPeminjamSaatIniAttribute()
     {
@@ -109,6 +138,12 @@ class Asset extends Model
     // Info tambahan per slot: apakah slot itu lagi ditempati foto petugas
     // (bukan foto asli), dan kapan diupload - dipakai frontend buat nampilin
     // badge "Dari petugas • [tanggal]" di grid foto Kelola Barang.
+    //
+    // 'diupload_oleh' selalu diisi kalau ada info-nya, baik itu foto hasil
+    // scan petugas (dari_petugas = true, namanya dari ScanLog::nama_petugas)
+    // maupun foto yang diupload manual lewat Kelola Barang (dari_petugas =
+    // false, namanya dari kolom foto_X_oleh - bisa admin ATAU petugas,
+    // sejak fitur kelola barang dibuka untuk petugas juga).
     public function getFotoSlotInfoAttribute()
     {
         $override = $this->overridePetugasPerSlot();
@@ -118,10 +153,20 @@ class Asset extends Model
                 return [
                     'dari_petugas' => true,
                     'diupload_pada' => $override[$slot]->scanned_at,
+                    'diupload_oleh' => $override[$slot]->nama_petugas,
                     'scan_log_id' => $override[$slot]->id,
                 ];
             }
-            return ['dari_petugas' => false, 'diupload_pada' => null, 'scan_log_id' => null];
+
+            $kolomOleh = "foto_{$slot}_oleh";
+            $kolomPada = "foto_{$slot}_pada";
+
+            return [
+                'dari_petugas' => false,
+                'diupload_pada' => $this->$kolomPada,
+                'diupload_oleh' => $this->$kolomOleh,
+                'scan_log_id' => null,
+            ];
         };
 
         return ['foto_1' => $buat(1), 'foto_2' => $buat(2), 'foto_3' => $buat(3)];

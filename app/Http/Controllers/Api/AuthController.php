@@ -149,6 +149,21 @@ class AuthController extends Controller
         ];
     }
 
+    // Sama seperti aturanPassword(), TAPI tanpa 'required' - dipakai waktu
+    // edit akun, di mana password boleh dikosongkan/tidak dikirim sama
+    // sekali (artinya "tidak diganti"). 'required' dan 'nullable' tidak
+    // boleh digabung dalam satu rule set (saling bertentangan) - itu bug
+    // sebelumnya yang bikin ganti password di akun yang sudah ada selalu
+    // gagal walau passwordnya sudah diisi benar.
+    private function aturanPasswordOpsional(): array
+    {
+        return [
+            'string',
+            'min:8',
+            'regex:/^(?=.*[A-Za-z])(?=.*\d).+$/',
+        ];
+    }
+
     private array $pesanValidasiAkun = [
         'email.regex' => 'Domain email ini tidak diizinkan. Cek daftar domain yang didukung di menu Pengaturan.',
         'email.email' => 'Format email tidak valid atau domainnya tidak terdaftar.',
@@ -196,10 +211,19 @@ class AuthController extends Controller
             $request->merge(['email' => $this->normalisasiEmail($request->input('email'))]);
         }
 
+        // Password itu OPSIONAL saat edit (kosong/tidak dikirim = tidak diganti).
+        // Sebelumnya rule password gabungan ['nullable', 'required', ...] -
+        // 'nullable' cuma melewatkan validasi kalau nilainya benar-benar null,
+        // padahal dari form Flutter yang dikirim adalah STRING KOSONG saat
+        // pengguna tidak mau ganti password (lihat ApiService.updateUser: kunci
+        // 'password' malah sengaja tidak disertakan sama sekali kalau kosong,
+        // tapi kalau suatu saat dikirim string kosong tetap akan gagal kena
+        // 'required'/'min:8'). Makanya di sini rule password HANYA diterapkan
+        // kalau field-nya memang diisi (filled), sesuai instruksi 'sometimes'.
         $data = $request->validate([
             'name' => 'required|string|max:100',
             'email' => array_merge($this->aturanEmailGmail(), ['unique:users,email,' . $user->id]),
-            'password' => array_merge(['nullable'], $this->aturanPassword()),
+            'password' => array_merge(['sometimes', 'nullable'], $this->aturanPasswordOpsional()),
             'role' => 'required|in:admin,petugas',
         ], $this->pesanValidasiAkun);
 

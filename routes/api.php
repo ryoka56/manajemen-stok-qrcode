@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AssetController;
+use App\Http\Controllers\Api\PerubahanController;
 use App\Http\Controllers\Api\ScanLogController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\AuthController;
@@ -39,16 +40,40 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/assets', [AssetController::class, 'index']);
     // Static path HARUS di atas /assets/{asset} (route matching dari atas ke bawah),
-    // kalau tidak "rekap"/"trash"/"scan" bakal ketangkep sebagai parameter {asset}.
+    // kalau tidak "rekap"/"trash"/"scan"/"bulk" bakal ketangkep sebagai parameter {asset}.
+    //
+    // Kelola Barang (tambah/edit/hapus/upload foto langsung) tetap admin-only.
+    // Petugas kelola barang lewat alur usulan (/perubahan di bawah) yang
+    // butuh ACC admin dulu - lihat PerubahanController.
     Route::middleware('admin')->group(function () {
         Route::get('/assets/rekap', [AssetController::class, 'rekap']);
         Route::get('/assets/trash', [AssetController::class, 'trash']);
         Route::post('/assets/{id}/restore', [AssetController::class, 'restore'])->whereNumber('id');
         Route::delete('/assets/{id}/force', [AssetController::class, 'forceDelete'])->whereNumber('id');
+        Route::post('/assets', [AssetController::class, 'store']);
+        // Route bulk HARUS didaftarkan sebelum /assets/{asset} supaya "bulk"
+        // tidak ketangkep sebagai parameter {asset} (route matching dari atas ke bawah).
+        Route::delete('/assets/bulk', [AssetController::class, 'destroyBulk']);
+        Route::put('/assets/{asset}', [AssetController::class, 'update']);
+        Route::delete('/assets/{asset}', [AssetController::class, 'destroy']);
+        Route::post('/assets/{asset}/foto', [AssetController::class, 'uploadFoto']);
+        Route::delete('/assets/{asset}/foto/{slot}', [AssetController::class, 'hapusFoto']);
     });
     Route::get('/assets/scan/{kode_aset}', [AssetController::class, 'scan']);
     Route::get('/assets/{asset}', [AssetController::class, 'show']);
     Route::get('/assets/{asset}/qrcode', [AssetController::class, 'qrcode']);
+
+    // Usulan tambah/edit barang dari petugas (butuh ACC admin). index() &
+    // ajukanEdit()/ajukanTambah() dibuka untuk semua yang login - kontrol
+    // role (petugas vs admin) ditangani di dalam controller-nya sendiri,
+    // sedangkan setujui()/tolak() memang khusus admin.
+    Route::get('/perubahan', [PerubahanController::class, 'index']);
+    Route::post('/perubahan', [PerubahanController::class, 'ajukanEdit']);
+    Route::post('/perubahan/tambah', [PerubahanController::class, 'ajukanTambah']);
+    Route::middleware('admin')->group(function () {
+        Route::post('/perubahan/{perubahan}/setujui', [PerubahanController::class, 'setujui']);
+        Route::post('/perubahan/{perubahan}/tolak', [PerubahanController::class, 'tolak']);
+    });
 
     Route::get('/scan-logs', [ScanLogController::class, 'index']);
     Route::post('/scan-logs', [ScanLogController::class, 'store']);
@@ -63,17 +88,13 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ---------- Khusus admin ----------
     Route::middleware('admin')->group(function () {
-        Route::post('/assets', [AssetController::class, 'store']);
-        // Route bulk HARUS didaftarkan sebelum /assets/{asset} supaya "bulk"
-        // tidak ketangkep sebagai parameter {asset} (route matching dari atas ke bawah).
-        Route::delete('/assets/bulk', [AssetController::class, 'destroyBulk']);
-        Route::put('/assets/{asset}', [AssetController::class, 'update']);
-        Route::delete('/assets/{asset}', [AssetController::class, 'destroy']);
-        Route::post('/assets/{asset}/foto', [AssetController::class, 'uploadFoto']);
-        Route::delete('/assets/{asset}/foto/{slot}', [AssetController::class, 'hapusFoto']);
-
         Route::get('/users', [AuthController::class, 'index']);
         Route::post('/users', [AuthController::class, 'store']);
+        // PENTING: route PUT ini sebelumnya belum pernah didaftarkan sama sekali,
+        // padahal AuthController::update() dan ApiService.updateUser() di Flutter
+        // sudah ada - itu sebabnya edit akun (termasuk ganti password) SELALU
+        // gagal (404) walau kodenya kelihatan benar. Ditambahkan di sini.
+        Route::put('/users/{user}', [AuthController::class, 'update']);
         Route::delete('/users/{user}', [AuthController::class, 'destroy']);
 
         Route::post('/ruangans', [RuanganController::class, 'store']);

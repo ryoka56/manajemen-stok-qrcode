@@ -16,7 +16,7 @@ class AssetController extends Controller
     // ?page= & ?per_page= (paginasi)
     public function index(Request $request)
     {
-        $query = Asset::with('lokasiTerakhir');
+        $query = Asset::with(['lokasiTerakhir', 'perubahanTertunda']);
 
         if ($request->filled('kategori')) {
             $query->where('kategori', $request->kategori);
@@ -75,6 +75,10 @@ class AssetController extends Controller
             ->groupBy('status')
             ->get();
 
+        $perKondisi = Asset::select('kondisi', DB::raw('count(*) as jumlah'))
+            ->groupBy('kondisi')
+            ->get();
+
         $perKategori = Asset::select('kategori', DB::raw('count(*) as jumlah'))
             ->groupBy('kategori')
             ->orderByDesc('jumlah')
@@ -106,6 +110,7 @@ class AssetController extends Controller
 
         return response()->json([
             'per_status' => $perStatus,
+            'per_kondisi' => $perKondisi,
             'per_kategori' => $perKategori,
             'per_ruangan' => $perRuangan,
             'total' => Asset::count(),
@@ -137,7 +142,8 @@ class AssetController extends Controller
         return response()->json(['message' => "\"$nama\" dihapus permanen"]);
     }
 
-    // POST /api/assets
+    // POST /api/assets - khusus admin. Petugas menambah barang lewat alur
+    // usulan (lihat PerubahanController::ajukanTambah) yang butuh ACC dulu.
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -145,6 +151,7 @@ class AssetController extends Controller
             'kategori' => 'required|string|max:100',
             'deskripsi' => 'nullable|string',
             'ruangan_asal' => 'nullable|string|max:100',
+            'kondisi' => 'sometimes|in:tersedia,rusak',
         ]);
 
         // Generate kode aset unik otomatis, mis. AST-000123.
@@ -166,17 +173,20 @@ class AssetController extends Controller
     }
 
     // PUT /api/assets/{asset} - khusus admin (lihat middleware route).
-    // Admin boleh ubah status langsung dari sini (override manual), beda
-    // dengan alur Scan (POST /scan-logs) yang wajib TTD + centang ketentuan
-    // untuk petugas. Perubahan lewat sini TIDAK membuat ScanLog baru,
-    // jadi tidak tercatat di riwayat lokasi/TTD - cuma buat koreksi cepat.
+    // Petugas TIDAK pakai endpoint ini lagi - perubahan dari petugas lewat
+    // PerubahanController (butuh ACC admin dulu). Admin tetap bisa ubah
+    // langsung dari sini (termasuk override status/kondisi manual buat
+    // koreksi cepat) - perubahan lewat sini TIDAK membuat ScanLog baru,
+    // jadi tidak tercatat di riwayat lokasi/TTD.
     public function update(Request $request, Asset $asset)
     {
         $data = $request->validate([
             'nama_barang' => 'sometimes|string|max:255',
             'kategori' => 'sometimes|string|max:100',
             'deskripsi' => 'nullable|string',
-            'status' => 'sometimes|in:tersedia,dipinjam,rusak',
+            'ruangan_asal' => 'nullable|string|max:100',
+            'status' => 'sometimes|in:ada,dipinjam',
+            'kondisi' => 'sometimes|in:tersedia,rusak',
         ]);
 
         $asset->update($data);
@@ -191,7 +201,10 @@ class AssetController extends Controller
         return response()->json(['message' => 'Aset berhasil dihapus (bisa dipulihkan lewat menu Sampah)']);
     }
 
-    // POST /api/assets/{asset}/foto - upload/ganti foto di slot 1/2/3 (admin only)
+    // POST /api/assets/{asset}/foto - upload/ganti foto di slot 1/2/3.
+    // Khusus admin (lihat middleware route) - upload foto petugas sekarang
+    // lewat PerubahanController (butuh ACC admin dulu juga, sesuai
+    // keputusan supaya foto yang diupload petugas tetap diverifikasi).
     // Body: multipart, field 'foto' (file gambar) + 'slot' (1, 2, atau 3)
     public function uploadFoto(Request $request, Asset $asset)
     {
@@ -208,7 +221,11 @@ class AssetController extends Controller
         }
 
         $path = $request->file('foto')->store('asset-photos', 'public');
-        $asset->update([$kolom => $path]);
+        $asset->update([
+            $kolom => $path,
+            $kolom . '_oleh' => $request->user()->name,
+            $kolom . '_pada' => now(),
+        ]);
 
         return response()->json($asset->fresh());
     }
@@ -224,7 +241,11 @@ class AssetController extends Controller
         if ($asset->$kolom) {
             \Illuminate\Support\Facades\Storage::disk('public')->delete($asset->$kolom);
         }
-        $asset->update([$kolom => null]);
+        $asset->update([
+            $kolom => null,
+            $kolom . '_oleh' => null,
+            $kolom . '_pada' => null,
+        ]);
 
         return response()->json($asset->fresh());
     }

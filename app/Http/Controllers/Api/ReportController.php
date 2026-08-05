@@ -10,11 +10,19 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ReportController extends Controller
 {
-    // GET /api/reports/excel
-    // Export daftar aset ke file CSV (bisa langsung dibuka di Excel)
+    // GET /api/reports/excel?status[]=ada&status[]=dipinjam&kondisi[]=rusak
+    // Export daftar aset ke file CSV (bisa langsung dibuka di Excel).
+    // status[]/kondisi[] OPSIONAL - kalau tidak dikirim, semua barang diekspor.
     public function exportExcel(Request $request): StreamedResponse
     {
-        $assets = Asset::with('lokasiTerakhir')->orderBy('kode_aset')->get();
+        $query = Asset::with('lokasiTerakhir')->orderBy('kode_aset');
+        if ($request->filled('status')) {
+            $query->whereIn('status', (array) $request->status);
+        }
+        if ($request->filled('kondisi')) {
+            $query->whereIn('kondisi', (array) $request->kondisi);
+        }
+        $assets = $query->get();
 
         $namaFile = 'laporan-aset-' . now()->format('Y-m-d') . '.csv';
 
@@ -30,7 +38,7 @@ class ReportController extends Controller
             fwrite($file, "\xEF\xBB\xBF");
 
             fputcsv($file, [
-                'Kode Aset', 'Nama Barang', 'Kategori', 'Status',
+                'Kode Aset', 'Nama Barang', 'Kategori', 'Status', 'Kondisi',
                 'Ruangan Asal', 'Deskripsi', 'Lokasi Terakhir', 'Waktu Scan Terakhir',
             ]);
 
@@ -39,7 +47,8 @@ class ReportController extends Controller
                     $a->kode_aset,
                     $a->nama_barang,
                     $a->kategori,
-                    $a->status,
+                    $a->status === 'dipinjam' ? 'Dipinjam' : 'Ada',
+                    $a->kondisi === 'rusak' ? 'Rusak' : 'Tersedia',
                     $a->ruangan_asal ?? '-',
                     $a->deskripsi ?? '-',
                     $a->lokasiTerakhir->lokasi_input ?? '-',
@@ -53,11 +62,19 @@ class ReportController extends Controller
         return response()->stream($callback, 200, $headers);
     }
 
-    // GET /api/reports/pdf
-    // Export daftar aset ke file PDF (untuk lampiran/cetak laporan)
+    // GET /api/reports/pdf?status[]=ada&status[]=dipinjam&kondisi[]=rusak
+    // Export daftar aset ke file PDF (untuk lampiran/cetak laporan).
+    // status[]/kondisi[] OPSIONAL - kalau tidak dikirim, semua barang diekspor.
     public function exportPdf(Request $request)
     {
-        $assets = Asset::with('lokasiTerakhir')->orderBy('kode_aset')->get();
+        $query = Asset::with('lokasiTerakhir')->orderBy('kode_aset');
+        if ($request->filled('status')) {
+            $query->whereIn('status', (array) $request->status);
+        }
+        if ($request->filled('kondisi')) {
+            $query->whereIn('kondisi', (array) $request->kondisi);
+        }
+        $assets = $query->get();
 
         // Tanda tangan HANYA ditampilkan di laporan selama barangnya masih
         // berstatus "dipinjam". Begitu dikembalikan/tersedia (atau rusak),

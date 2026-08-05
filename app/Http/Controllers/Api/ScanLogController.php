@@ -17,7 +17,7 @@ class ScanLogController extends Controller
     // admin bisa lihat semua (atau filter by user_id tertentu).
     public function index(Request $request)
     {
-        $query = ScanLog::with(['asset:id,nama_barang,kode_aset,kategori,status', 'user:id,name']);
+        $query = ScanLog::with(['asset:id,nama_barang,kode_aset,kategori,status,kondisi', 'user:id,name']);
 
         $user = $request->user();
 
@@ -53,19 +53,22 @@ class ScanLogController extends Controller
             // kosong - gak masuk akal nanya "siapa peminjam" pas ngembaliin.
             'nama_peminjam' => 'required|string|max:100',
             'catatan' => 'nullable|string',
-            'status' => 'nullable|in:tersedia,dipinjam,rusak',
-            // Tanda tangan digital & centang persetujuan ketentuan sekarang WAJIB
-            // di setiap aksi scan (apapun status barunya), bukan cuma pas
-            // meminjam. Dikirim sebagai data URL base64 (hasil ekspor canvas
-            // signature pad dari Flutter), makanya divalidasi sebagai string,
-            // bukan 'image'.
+            // status = 'ada'/'dipinjam' (aksi pinjam/kembalikan). kondisi =
+            // 'tersedia'/'rusak' (kondisi fisik barang) - keduanya independen,
+            // barang boleh saja rusak TAPI tetap dipinjam (sesuai keputusan),
+            // jadi TIDAK saling membatasi di sini.
+            'status' => 'nullable|in:ada,dipinjam',
+            'kondisi' => 'nullable|in:tersedia,rusak',
+            // Tanda tangan digital & centang persetujuan ketentuan WAJIB di
+            // setiap aksi scan (apapun status barunya). Dikirim sebagai data
+            // URL base64 (hasil ekspor canvas signature pad dari Flutter),
+            // makanya divalidasi sebagai string, bukan 'image'.
             'tanda_tangan' => 'required|string',
             'setuju_ketentuan' => 'required|boolean|accepted',
-            // Foto OPSIONAL - petugas boleh gak upload apa-apa. Sama seperti
-            // tanda_tangan, dikirim sebagai data URL base64 (hasil dari
-            // image_picker di Flutter yang di-encode dulu), bukan file
-            // upload multipart biasa, jadi validasinya string.
-            'foto' => 'nullable|string',
+            // CATATAN: opsi upload foto SUDAH DIPINDAH dari alur scan ini ke
+            // Kelola Barang (petugas lewat usulan/ACC, admin langsung) - lihat
+            // PerubahanController & AssetController::uploadFoto. Field 'foto'
+            // sengaja tidak diterima lagi di sini.
         ]);
 
         $asset = Asset::where('kode_aset', $data['kode_aset'])->firstOrFail();
@@ -73,6 +76,8 @@ class ScanLogController extends Controller
 
         $statusSebelum = $asset->status;
         $statusBaru = $data['status'] ?? $asset->status;
+        $kondisiSebelum = $asset->kondisi;
+        $kondisiBaru = $data['kondisi'] ?? $asset->kondisi;
 
         // Cegah barang yang LAGI dipinjam orang lain "dipinjam" lagi oleh
         // scan lain (mis. 2 petugas gak sadar scan barang yang sama).
@@ -89,40 +94,14 @@ class ScanLogController extends Controller
         }
 
         // Statistik "Peminjaman" HANYA naik kalau transisinya beneran
-        // (tersedia/rusak) -> dipinjam. Selain itu (mis. tersedia <-> rusak)
-        // dianggap bukan aksi pinjam, jadi tidak dihitung.
+        // ada -> dipinjam (murni soal status, gak peduli kondisi berubah atau tidak).
         $isPeminjaman = $statusSebelum !== 'dipinjam' && $statusBaru === 'dipinjam';
         $isPengembalian = $statusSebelum === 'dipinjam' && $statusBaru !== 'dipinjam';
 
-        // Tanda tangan & ketentuan sekarang disimpan untuk SETIAP scan log
-        // (apapun transisinya), karena validasi di atas sudah mewajibkan
-        // keduanya di semua status.
+        // Tanda tangan & ketentuan disimpan untuk SETIAP scan log (apapun
+        // transisinya), karena validasi di atas sudah mewajibkan keduanya.
         $pathTandaTangan = $this->simpanTandaTangan($data['tanda_tangan']);
         $ketentuanSnapshot = Pengaturan::ambil('deskripsi_persetujuan', '');
-
-        // Foto opsional - kalau petugas gak upload apa-apa, kolomnya tetap
-        // null (bukan wajib, beda dengan tanda tangan & ketentuan).
-        //
-        // Kalau ADA foto, dia harus "menempati" salah satu dari 3 slot foto
-        // barang (assets.foto_1/2/3 - sama slot yang dipakai admin di Kelola
-        // Barang). Dicek slot mana yang masih kosong DULU, sebelum file-nya
-        // beneran disimpan - kalau ternyata udah 3/3 penuh, seluruh
-        // permintaan scan ini ditolak (bukan cuma bagian fotonya doang),
-        // dengan pesan jelas suruh hapus salah satu foto lama dulu. Ini
-        // sengaja dicek sebelum simpanFoto() dipanggil, biar gak nyampah
-        // file yang ujung-ujungnya ditolak juga.
-        $pathFoto = null;
-        $slotFoto = null;
-        if (!empty($data['foto'])) {
-            $slotFoto = $this->slotKosongBerikutnya($asset);
-            if ($slotFoto === null) {
-                return response()->json([
-                    'message' => 'Slot foto barang ini sudah penuh (3/3). Hapus salah satu foto '
-                        . 'lama dulu (lewat Kelola Barang) sebelum menambah foto baru.',
-                ], 422);
-            }
-            $pathFoto = $this->simpanFoto($data['foto']);
-        }
 
         $log = ScanLog::create([
             'asset_id' => $asset->id,
@@ -135,45 +114,24 @@ class ScanLogController extends Controller
             'catatan' => $data['catatan'] ?? null,
             'status_saat_itu' => $statusBaru,
             'status_sebelum' => $statusSebelum,
+            'kondisi_saat_itu' => $kondisiBaru,
+            'kondisi_sebelum' => $kondisiSebelum,
             'is_peminjaman' => $isPeminjaman,
             'is_pengembalian' => $isPengembalian,
             'tanda_tangan' => $pathTandaTangan,
             'setuju_ketentuan' => (bool) $data['setuju_ketentuan'],
             'ketentuan_snapshot' => $ketentuanSnapshot,
-            'foto' => $pathFoto,
-            'foto_aktif' => true,
-            'slot' => $slotFoto,
             'scanned_at' => now(),
         ]);
 
-        if ($statusBaru !== $statusSebelum) {
-            $asset->update(['status' => $statusBaru]);
+        $perubahanAsset = [];
+        if ($statusBaru !== $statusSebelum) $perubahanAsset['status'] = $statusBaru;
+        if ($kondisiBaru !== $kondisiSebelum) $perubahanAsset['kondisi'] = $kondisiBaru;
+        if (!empty($perubahanAsset)) {
+            $asset->update($perubahanAsset);
         }
 
         return response()->json($log, 201);
-    }
-
-    // Cari slot foto (1, 2, atau 3) yang masih kosong buat barang ini.
-    // "Kosong" artinya: foto ASLI di kolom itu (assets.foto_N) belum diisi,
-    // DAN belum ada foto petugas yang lagi aktif menempati slot itu.
-    // Slot dicek berurutan 1 -> 2 -> 3, dipakai yang pertama kosong.
-    // Return null kalau ketiga-tiganya sudah terisi (gak ada slot kosong).
-    private function slotKosongBerikutnya(Asset $asset): ?int
-    {
-        for ($slot = 1; $slot <= 3; $slot++) {
-            $fotoAsli = $asset->{"foto_$slot"};
-            $adaOverridePetugas = ScanLog::where('asset_id', $asset->id)
-                ->where('slot', $slot)
-                ->whereNotNull('foto')
-                ->where('foto_aktif', true)
-                ->exists();
-
-            if (!$fotoAsli && !$adaOverridePetugas) {
-                return $slot;
-            }
-        }
-
-        return null;
     }
 
     // Decode data URL base64 (hasil export canvas signature pad Flutter,
@@ -187,23 +145,6 @@ class ScanLogController extends Controller
 
         $isi = base64_decode($dataUrl);
         $namaFile = 'tanda-tangan/' . Str::uuid() . '.png';
-        Storage::disk('public')->put($namaFile, $isi);
-
-        return $namaFile;
-    }
-
-    // Sama persis pola simpanTandaTangan() - decode data URL base64 lalu
-    // simpan sebagai file. Folder beda ('scan-foto') biar gampang dibedain
-    // pas lihat langsung ke storage, tapi tetap dilayani lewat route
-    // /api/foto/{path} yang sama (route itu generik, gak peduli foldernya).
-    private function simpanFoto(string $dataUrl): string
-    {
-        if (str_contains($dataUrl, ',')) {
-            $dataUrl = explode(',', $dataUrl, 2)[1];
-        }
-
-        $isi = base64_decode($dataUrl);
-        $namaFile = 'scan-foto/' . Str::uuid() . '.jpg';
         Storage::disk('public')->put($namaFile, $isi);
 
         return $namaFile;
@@ -246,7 +187,7 @@ class ScanLogController extends Controller
     // GET /api/scan-logs/peta
     public function peta(Request $request)
     {
-        $query = ScanLog::with(['asset:id,nama_barang,kode_aset,kategori,status', 'user:id,name'])
+        $query = ScanLog::with(['asset:id,nama_barang,kode_aset,kategori,status,kondisi', 'user:id,name'])
             ->whereIn('id', function ($q) {
                 $q->selectRaw('MAX(id)')->from('scan_logs')->groupBy('asset_id');
             });

@@ -10,9 +10,10 @@
         th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; }
         th { background-color: #29C5E8; color: #000; }
         tr:nth-child(even) { background-color: #f5f7fa; }
-        .status-tersedia { color: #2E9E5B; font-weight: bold; }
+        .status-ada { color: #2E9E5B; font-weight: bold; }
         .status-dipinjam { color: #CC9A2E; font-weight: bold; }
-        .status-rusak { color: #B03A3A; font-weight: bold; }
+        .kondisi-tersedia { color: #2E9E5B; font-weight: bold; }
+        .kondisi-rusak { color: #B03A3A; font-weight: bold; }
         .footer { margin-top: 20px; font-size: 9px; color: #999; }
         .ttd-img { height: 40px; }
         .ttd-kosong { color: #bbb; font-style: italic; }
@@ -29,6 +30,7 @@
                 <th>Nama Barang</th>
                 <th>Kategori</th>
                 <th>Status</th>
+                <th>Kondisi</th>
                 <th>Ruangan Asal</th>
                 <th>Lokasi Terakhir</th>
                 <th>Waktu Scan Terakhir</th>
@@ -41,7 +43,8 @@
                 <td>{{ $a->kode_aset }}</td>
                 <td>{{ $a->nama_barang }}</td>
                 <td>{{ $a->kategori }}</td>
-                <td class="status-{{ $a->status }}">{{ $a->status }}</td>
+                <td class="status-{{ $a->status }}">{{ $a->status === 'dipinjam' ? 'Dipinjam' : 'Ada' }}</td>
+                <td class="kondisi-{{ $a->kondisi }}">{{ $a->kondisi === 'rusak' ? 'Rusak' : 'Tersedia' }}</td>
                 <td>{{ $a->ruangan_asal ?? '-' }}</td>
                 <td>{{ $a->lokasiTerakhir->lokasi_input ?? '-' }}</td>
                 <td>{{ $a->lokasiTerakhir ? \Carbon\Carbon::parse($a->lokasiTerakhir->scanned_at)->format('d/m/Y H:i') : '-' }}</td>
