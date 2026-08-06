@@ -43,8 +43,8 @@
                 <td>{{ $a->kode_aset }}</td>
                 <td>{{ $a->nama_barang }}</td>
                 <td>{{ $a->kategori }}</td>
-                <td class="status-{{ $a->status }}">{{ $a->status === 'dipinjam' ? 'Dipinjam' : 'Ada' }}</td>
-                <td class="kondisi-{{ $a->kondisi }}">{{ $a->kondisi === 'rusak' ? 'Rusak' : 'Tersedia' }}</td>
+                <td class="status-{{ $a->status }}">{{ $a->status === 'dipinjam' ? 'Dipinjam' : 'Tersedia' }}</td>
+                <td class="kondisi-{{ $a->kondisi }}">{{ $a->kondisi === 'rusak' ? 'Rusak' : 'Baik' }}</td>
                 <td>{{ $a->ruangan_asal ?? '-' }}</td>
                 <td>{{ $a->lokasiTerakhir->lokasi_input ?? '-' }}</td>
                 <td>{{ $a->lokasiTerakhir ? \Carbon\Carbon::parse($a->lokasiTerakhir->scanned_at)->format('d/m/Y H:i') : '-' }}</td>
