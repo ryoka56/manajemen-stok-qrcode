@@ -24,6 +24,7 @@ class AssetPerubahan extends Model
     protected $casts = [
         'data_usulan' => 'array',
         'data_lama' => 'array',
+        'otomatis' => 'boolean',
         'diproses_pada' => 'datetime',
     ];
 
