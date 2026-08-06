@@ -14,6 +14,7 @@ class AssetPerubahan extends Model
         'data_usulan',
         'data_lama',
         'status',
+        'otomatis',
         'alasan_ditolak',
         'diajukan_oleh',
         'diproses_oleh',
