@@ -47,7 +47,7 @@ class ReportController extends Controller
                     $a->kode_aset,
                     $a->nama_barang,
                     $a->kategori,
-                    $a->status === 'dipinjam' ? 'Dipinjam' : 'Tersedia',
+                    $a->status === 'dipinjam' ? 'Dipinjam' : ($a->status === 'hilang' ? 'Hilang' : 'Tersedia'),
                     $a->kondisi === 'rusak' ? 'Rusak' : 'Baik',
                     $a->ruangan_asal ?? '-',
                     $a->deskripsi ?? '-',

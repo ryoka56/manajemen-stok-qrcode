@@ -12,6 +12,7 @@
         tr:nth-child(even) { background-color: #f5f7fa; }
         .status-ada { color: #2E9E5B; font-weight: bold; }
         .status-dipinjam { color: #CC9A2E; font-weight: bold; }
+        .status-hilang { color: #B03A3A; font-weight: bold; }
         .kondisi-tersedia { color: #2E9E5B; font-weight: bold; }
         .kondisi-rusak { color: #B03A3A; font-weight: bold; }
         .footer { margin-top: 20px; font-size: 9px; color: #999; }
@@ -43,7 +44,7 @@
                 <td>{{ $a->kode_aset }}</td>
                 <td>{{ $a->nama_barang }}</td>
                 <td>{{ $a->kategori }}</td>
-                <td class="status-{{ $a->status }}">{{ $a->status === 'dipinjam' ? 'Dipinjam' : 'Tersedia' }}</td>
+                <td class="status-{{ $a->status }}">{{ $a->status === 'dipinjam' ? 'Dipinjam' : ($a->status === 'hilang' ? 'Hilang' : 'Tersedia') }}</td>
                 <td class="kondisi-{{ $a->kondisi }}">{{ $a->kondisi === 'rusak' ? 'Rusak' : 'Baik' }}</td>
                 <td>{{ $a->ruangan_asal ?? '-' }}</td>
                 <td>{{ $a->lokasiTerakhir->lokasi_input ?? '-' }}</td>

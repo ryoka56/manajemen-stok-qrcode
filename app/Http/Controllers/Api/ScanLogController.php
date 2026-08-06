@@ -53,11 +53,11 @@ class ScanLogController extends Controller
             // kosong - gak masuk akal nanya "siapa peminjam" pas ngembaliin.
             'nama_peminjam' => 'required|string|max:100',
             'catatan' => 'nullable|string',
-            // status = 'ada'/'dipinjam' (aksi pinjam/kembalikan). kondisi =
-            // 'tersedia'/'rusak' (kondisi fisik barang) - keduanya independen,
-            // barang boleh saja rusak TAPI tetap dipinjam (sesuai keputusan),
-            // jadi TIDAK saling membatasi di sini.
-            'status' => 'nullable|in:ada,dipinjam',
+            // status = 'ada'/'dipinjam'/'hilang' (aksi pinjam/kembalikan/lapor
+            // hilang). kondisi = 'tersedia'/'rusak' (kondisi fisik barang) -
+            // keduanya independen, barang boleh saja rusak TAPI tetap
+            // dipinjam (sesuai keputusan), jadi TIDAK saling membatasi di sini.
+            'status' => 'nullable|in:ada,dipinjam,hilang',
             'kondisi' => 'nullable|in:tersedia,rusak',
             // Tanda tangan digital & centang persetujuan ketentuan WAJIB di
             // setiap aksi scan (apapun status barunya). Dikirim sebagai data

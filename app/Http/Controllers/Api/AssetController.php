@@ -14,6 +14,7 @@ class AssetController extends Controller
     // GET /api/assets
     // Mendukung: ?cari= (nama barang ATAU kode aset - case-insensitive),
     // ?kategori= (filter kategori), ?ruangan= (filter ruangan/rak asal),
+    // ?status= (ada/dipinjam), ?kondisi= (tersedia/rusak),
     // ?page= & ?per_page= (paginasi)
     public function index(Request $request)
     {
@@ -24,6 +25,12 @@ class AssetController extends Controller
         }
         if ($request->filled('ruangan')) {
             $query->where('ruangan_asal', $request->ruangan);
+        }
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+        if ($request->filled('kondisi')) {
+            $query->where('kondisi', $request->kondisi);
         }
         if ($request->filled('cari')) {
             // Dicari di DUA kolom sekaligus: nama_barang & kode_aset. Dipaksa
@@ -216,7 +223,7 @@ class AssetController extends Controller
             'kategori' => 'sometimes|string|max:100',
             'deskripsi' => 'nullable|string',
             'ruangan_asal' => 'nullable|string|max:100',
-            'status' => 'sometimes|in:ada,dipinjam',
+            'status' => 'sometimes|in:ada,dipinjam,hilang',
             'kondisi' => 'sometimes|in:tersedia,rusak',
         ]);
 
