@@ -207,9 +207,10 @@ class AssetController extends Controller
     // PUT /api/assets/{asset} - admin & petugas BOLEH keduanya (lihat route).
     // Sejak fitur "petugas edit langsung", field TEKS (nama/kategori/dst)
     // diterapkan seketika tanpa ACC. Cuma foto yang masih lewat
-    // PerubahanController (butuh ACC admin). 'status' (ada/dipinjam) TETAP
-    // cuma bisa diubah admin - itu murni hasil alur Scan, bukan sesuatu
-    // yang diedit manual dari Kelola Barang (sama seperti aturan lama).
+    // PerubahanController (butuh ACC admin). 'status' (ada/dipinjam/hilang)
+    // dan 'ruangan_asal' (posisi awal) TETAP cuma bisa diubah admin - itu
+    // murni hasil alur Scan / koreksi manual admin, bukan sesuatu yang
+    // diedit bebas dari Kelola Barang (sama seperti aturan lama untuk status).
     // Tiap perubahan (dari admin maupun petugas) dicatat ke asset_perubahan
     // (otomatis=true, status='disetujui') murni buat riwayat/audit -
     // supaya admin bisa lihat apa saja yang diubah petugas. Admin tetap bisa ubah
@@ -229,12 +230,17 @@ class AssetController extends Controller
 
         $user = $request->user();
 
-        // 'status' cuma boleh diubah admin - petugas yang kirim field ini
-        // (mis. lewat request manual di luar app) diam-diam diabaikan,
-        // bukan ditolak, biar UI petugas yang emang gak nampilin field ini
-        // gak perlu ganti kode buat rapiin payload-nya.
+        // 'ruangan_asal' & 'status' cuma boleh diubah admin - petugas yang
+        // kirim field ini (mis. lewat request manual di luar app, atau form
+        // Kelola Barang versi lama) diam-diam diabaikan, bukan ditolak, biar
+        // UI petugas yang sudah gak nampilin field ini gak perlu ganti kode.
+        // 'ruangan_asal' sengaja dikunci ketat: begitu barang dibuat, posisi
+        // awalnya HARUS tetap jadi acuan tetap kecuali admin sendiri yang
+        // sengaja mengoreksinya - tidak boleh "kegeser" diam-diam lewat alur
+        // lain (mis. petugas edit field lain tapi ruangan ikut kebawa ganti).
         if (!$user->isAdmin()) {
             unset($data['status']);
+            unset($data['ruangan_asal']);
         }
 
         if (empty($data)) {
