@@ -69,4 +69,23 @@ class RuanganController extends Controller
         $ruangan->delete();
         return response()->json(['message' => 'Ruangan berhasil dihapus']);
     }
+
+    // GET /api/ruangans/{ruangan}/barang - admin & petugas (dipakai layar
+    // Detail Ruangan setelah scan QR ruangan). Asset terhubung ke ruangan
+    // lewat NAMA (kolom ruangan_asal), bukan foreign key - lihat catatan
+    // di update() di atas soal kenapa nama harus di-cascade kalau diganti.
+    // Sekalian dibalikin info ruangan-nya (bukan cuma id dari QR) biar
+    // Flutter cukup satu kali panggil API buat isi header + daftar barang.
+    public function barang(Ruangan $ruangan)
+    {
+        $assets = Asset::with(['lokasiTerakhir', 'perubahanTertunda'])
+            ->where('ruangan_asal', $ruangan->nama_ruangan)
+            ->orderBy('nama_barang')
+            ->get();
+
+        return response()->json([
+            'ruangan' => $ruangan,
+            'barang' => $assets,
+        ]);
+    }
 }
