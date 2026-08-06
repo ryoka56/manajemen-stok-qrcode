@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Asset;
+use App\Models\AssetPerubahan;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
@@ -142,8 +143,14 @@ class AssetController extends Controller
         return response()->json(['message' => "\"$nama\" dihapus permanen"]);
     }
 
-    // POST /api/assets - khusus admin. Petugas menambah barang lewat alur
-    // usulan (lihat PerubahanController::ajukanTambah) yang butuh ACC dulu.
+    // POST /api/assets - admin & petugas BOLEH keduanya (lihat route).
+    // Petugas tambah barang langsung masuk database (tidak lagi lewat
+    // usulan/ACC) - satu-satunya yang masih butuh ACC admin adalah foto,
+    // itu jalan terpisah lewat PerubahanController setelah barang ini ada.
+    // Supaya admin tetap bisa lihat riwayat "barang apa yang ditambahkan
+    // petugas", tiap tambah dicatat sebagai baris asset_perubahan dengan
+    // otomatis=true, status='disetujui' dari awal (murni audit trail, BUKAN
+    // usulan yang perlu diklik ACC).
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -161,7 +168,25 @@ class AssetController extends Controller
         // sama kode_aset punya barang yang sudah dihapus tapi belum permanen.
         $data['kode_aset'] = 'AST-' . str_pad((Asset::withTrashed()->max('id') + 1), 6, '0', STR_PAD_LEFT);
 
-        $asset = Asset::create($data);
+        $user = $request->user();
+
+        $asset = DB::transaction(function () use ($data, $user) {
+            $asset = Asset::create($data);
+
+            AssetPerubahan::create([
+                'asset_id' => $asset->id,
+                'jenis' => 'tambah',
+                'data_usulan' => $asset->only(['nama_barang', 'kategori', 'deskripsi', 'ruangan_asal', 'kondisi']),
+                'data_lama' => null,
+                'status' => 'disetujui',
+                'otomatis' => true,
+                'diajukan_oleh' => $user->id,
+                'diproses_oleh' => $user->id,
+                'diproses_pada' => now(),
+            ]);
+
+            return $asset;
+        });
 
         return response()->json($asset, 201);
     }
@@ -172,9 +197,15 @@ class AssetController extends Controller
         return response()->json($asset->load(['scanLogs', 'lokasiTerakhir']));
     }
 
-    // PUT /api/assets/{asset} - khusus admin (lihat middleware route).
-    // Petugas TIDAK pakai endpoint ini lagi - perubahan dari petugas lewat
-    // PerubahanController (butuh ACC admin dulu). Admin tetap bisa ubah
+    // PUT /api/assets/{asset} - admin & petugas BOLEH keduanya (lihat route).
+    // Sejak fitur "petugas edit langsung", field TEKS (nama/kategori/dst)
+    // diterapkan seketika tanpa ACC. Cuma foto yang masih lewat
+    // PerubahanController (butuh ACC admin). 'status' (ada/dipinjam) TETAP
+    // cuma bisa diubah admin - itu murni hasil alur Scan, bukan sesuatu
+    // yang diedit manual dari Kelola Barang (sama seperti aturan lama).
+    // Tiap perubahan (dari admin maupun petugas) dicatat ke asset_perubahan
+    // (otomatis=true, status='disetujui') murni buat riwayat/audit -
+    // supaya admin bisa lihat apa saja yang diubah petugas. Admin tetap bisa ubah
     // langsung dari sini (termasuk override status/kondisi manual buat
     // koreksi cepat) - perubahan lewat sini TIDAK membuat ScanLog baru,
     // jadi tidak tercatat di riwayat lokasi/TTD.
@@ -189,9 +220,52 @@ class AssetController extends Controller
             'kondisi' => 'sometimes|in:tersedia,rusak',
         ]);
 
-        $asset->update($data);
+        $user = $request->user();
 
-        return response()->json($asset);
+        // 'status' cuma boleh diubah admin - petugas yang kirim field ini
+        // (mis. lewat request manual di luar app) diam-diam diabaikan,
+        // bukan ditolak, biar UI petugas yang emang gak nampilin field ini
+        // gak perlu ganti kode buat rapiin payload-nya.
+        if (!$user->isAdmin()) {
+            unset($data['status']);
+        }
+
+        if (empty($data)) {
+            return response()->json($asset);
+        }
+
+        $dataLamaUntukField = $asset->only(array_keys($data));
+
+        DB::transaction(function () use ($asset, $data, $user, $dataLamaUntukField) {
+            $asset->update($data);
+
+            // Cuma dicatat kalau ada nilai yang BENERAN berubah (bukan
+            // kirim ulang nilai yang sama), biar riwayat gak nyampah.
+            $benerBeda = false;
+            foreach ($data as $key => $value) {
+                if ((string) ($dataLamaUntukField[$key] ?? '') !== (string) ($value ?? '')) {
+                    $benerBeda = true;
+                    break;
+                }
+            }
+            if (!$benerBeda) {
+                return;
+            }
+
+            AssetPerubahan::create([
+                'asset_id' => $asset->id,
+                'jenis' => 'edit',
+                'data_usulan' => $data,
+                'data_lama' => $dataLamaUntukField,
+                'status' => 'disetujui',
+                'otomatis' => true,
+                'diajukan_oleh' => $user->id,
+                'diproses_oleh' => $user->id,
+                'diproses_pada' => now(),
+            ]);
+        });
+
+        return response()->json($asset->fresh());
     }
 
     // DELETE /api/assets/{asset} - soft delete, bisa dipulihkan lewat trash

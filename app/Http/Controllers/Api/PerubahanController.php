@@ -11,14 +11,14 @@ use Illuminate\Support\Facades\Storage;
 
 class PerubahanController extends Controller
 {
-    // Field data barang yang boleh diusulkan petugas & disnapshot sebagai data_lama.
-    // 'status' (ada/dipinjam) SENGAJA tidak termasuk - itu murni hasil alur
-    // Scan, bukan sesuatu yang diusulkan lewat Kelola Barang.
-    private const FIELD_BOLEH_DIUBAH = ['nama_barang', 'kategori', 'deskripsi', 'ruangan_asal', 'kondisi'];
-
     // GET /api/perubahan
-    // Admin: lihat semua usulan (bisa difilter ?status=menunggu|disetujui|ditolak).
-    // Petugas: cuma lihat usulan yang DIA ajukan sendiri (buat cek status/alasan ditolak).
+    // Dipakai buat DUA hal sekaligus (dibedakan lewat ?status= dan/atau
+    // ?otomatis=):
+    // - Persetujuan (admin): usulan FOTO yang beneran nunggu ACC, otomatis=false.
+    // - Riwayat aktivitas (admin): baris otomatis=true, hasil tambah/edit
+    //   langsung petugas (dan admin) - murni buat audit, bukan buat diklik ACC.
+    // Petugas: cuma lihat baris yang DIA ajukan sendiri (buat cek status
+    // usulan foto miliknya, atau riwayat perubahannya sendiri).
     public function index(Request $request)
     {
         $query = AssetPerubahan::with(['asset', 'pengaju:id,name', 'pemroses:id,name']);
@@ -26,111 +26,65 @@ class PerubahanController extends Controller
         $user = $request->user();
         if (!$user->isAdmin()) {
             $query->where('diajukan_oleh', $user->id);
-        } elseif ($request->filled('status')) {
-            $query->where('status', $request->status);
+        } else {
+            if ($request->filled('status')) {
+                $query->where('status', $request->status);
+            }
+            if ($request->filled('otomatis')) {
+                $query->where('otomatis', $request->boolean('otomatis'));
+            }
         }
 
         return response()->json($query->latest()->paginate(20));
     }
 
-    // POST /api/perubahan - petugas mengusulkan EDIT barang yang sudah ada.
-    // Body: asset_id (wajib) + salah satu/lebih dari nama_barang/kategori/
-    // deskripsi/ruangan_asal/kondisi, dan/atau file 'foto' + 'slot' (1-3).
+    // POST /api/perubahan - petugas mengusulkan FOTO baru/pengganti buat
+    // barang yang SUDAH ADA (baik lama, maupun baru saja ditambahkan lewat
+    // AssetController::store). Ini SATU-SATUNYA hal yang masih butuh ACC
+    // admin - field teks (nama/kategori/dst) sudah diterapkan langsung lewat
+    // AssetController::update, tidak lewat sini lagi.
+    // Body: asset_id (wajib) + file 'foto' + 'slot' (1-3).
     public function ajukanEdit(Request $request)
     {
         $user = $request->user();
         if ($user->isAdmin()) {
-            return response()->json(['message' => 'Admin mengubah barang langsung lewat Kelola Barang, bukan lewat usulan.'], 403);
+            return response()->json(['message' => 'Admin mengubah foto langsung lewat Kelola Barang, bukan lewat usulan.'], 403);
         }
 
         $data = $request->validate([
             'asset_id' => 'required|integer|exists:assets,id',
-            'nama_barang' => 'sometimes|string|max:255',
-            'kategori' => 'sometimes|string|max:100',
-            'deskripsi' => 'nullable|string',
-            'ruangan_asal' => 'nullable|string|max:100',
-            'kondisi' => 'sometimes|in:tersedia,rusak',
-            'foto' => 'nullable|image|max:5120',
-            'slot' => 'required_with:foto|integer|in:1,2,3',
+            'foto' => 'required|image|max:5120',
+            'slot' => 'required|integer|in:1,2,3',
         ]);
 
         $asset = Asset::findOrFail($data['asset_id']);
 
-        // Satu barang cuma boleh punya SATU usulan aktif (menunggu) di satu
-        // waktu - kalau petugas edit lagi sebelum yg lama diproses, ditolak
-        // dengan pesan jelas (sesuai keputusan: bukan ditimpa, bukan antre).
+        // Satu barang cuma boleh punya SATU usulan foto aktif (menunggu) di
+        // satu waktu - kalau petugas upload lagi sebelum yg lama diproses,
+        // ditolak dengan pesan jelas (sesuai keputusan: bukan ditimpa, bukan antre).
         $sudahAdaTertunda = AssetPerubahan::where('asset_id', $asset->id)->where('status', 'menunggu')->exists();
         if ($sudahAdaTertunda) {
             return response()->json([
-                'message' => 'Barang ini masih punya usulan perubahan yang menunggu ACC admin. '
-                    . 'Tunggu sampai disetujui/ditolak dulu sebelum mengajukan perubahan baru.',
+                'message' => 'Barang ini masih punya usulan foto yang menunggu ACC admin. '
+                    . 'Tunggu sampai disetujui/ditolak dulu sebelum mengajukan foto baru.',
             ], 409);
         }
 
-        $usulan = collect($data)->only(self::FIELD_BOLEH_DIUBAH)->filter(fn ($v) => $v !== null)->all();
-
-        if ($request->hasFile('foto')) {
-            // Disimpan di disk terpisah ('asset-photos-pending') supaya TIDAK
-            // langsung menimpa foto asli barang sebelum di-ACC admin.
-            $path = $request->file('foto')->store('asset-photos-pending', 'public');
-            $usulan['foto'] = ['slot' => (int) $data['slot'], 'path' => $path];
-        }
-
-        if (empty($usulan)) {
-            return response()->json(['message' => 'Tidak ada perubahan yang diajukan.'], 422);
-        }
-
-        $dataLama = collect($asset->only(self::FIELD_BOLEH_DIUBAH))->all();
+        // Disimpan di disk terpisah ('asset-photos-pending') supaya TIDAK
+        // langsung menimpa foto asli barang sebelum di-ACC admin.
+        $path = $request->file('foto')->store('asset-photos-pending', 'public');
 
         $perubahan = AssetPerubahan::create([
             'asset_id' => $asset->id,
             'jenis' => 'edit',
-            'data_usulan' => $usulan,
-            'data_lama' => $dataLama,
+            'data_usulan' => ['foto' => ['slot' => (int) $data['slot'], 'path' => $path]],
+            'data_lama' => null,
             'status' => 'menunggu',
+            'otomatis' => false,
             'diajukan_oleh' => $user->id,
         ]);
 
         return response()->json($perubahan->load('asset'), 201);
-    }
-
-    // POST /api/perubahan/tambah - petugas mengusulkan barang BARU.
-    // Barang belum benar-benar ada di tabel assets sampai admin ACC.
-    public function ajukanTambah(Request $request)
-    {
-        $user = $request->user();
-        if ($user->isAdmin()) {
-            return response()->json(['message' => 'Admin menambah barang langsung lewat Kelola Barang, bukan lewat usulan.'], 403);
-        }
-
-        $data = $request->validate([
-            'nama_barang' => 'required|string|max:255',
-            'kategori' => 'required|string|max:100',
-            'deskripsi' => 'nullable|string',
-            'ruangan_asal' => 'nullable|string|max:100',
-            'kondisi' => 'sometimes|in:tersedia,rusak',
-            'foto' => 'nullable|image|max:5120',
-            'slot' => 'nullable|integer|in:1,2,3',
-        ]);
-
-        $usulan = collect($data)->only(self::FIELD_BOLEH_DIUBAH)->filter(fn ($v) => $v !== null)->all();
-        $usulan['kondisi'] = $usulan['kondisi'] ?? 'tersedia';
-
-        if ($request->hasFile('foto')) {
-            $path = $request->file('foto')->store('asset-photos-pending', 'public');
-            $usulan['foto'] = ['slot' => (int) ($data['slot'] ?? 1), 'path' => $path];
-        }
-
-        $perubahan = AssetPerubahan::create([
-            'asset_id' => null,
-            'jenis' => 'tambah',
-            'data_usulan' => $usulan,
-            'data_lama' => null,
-            'status' => 'menunggu',
-            'diajukan_oleh' => $user->id,
-        ]);
-
-        return response()->json($perubahan, 201);
     }
 
     // POST /api/perubahan/{perubahan}/setujui - admin only (lihat middleware route)

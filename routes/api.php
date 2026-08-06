@@ -42,19 +42,22 @@ Route::middleware('auth:sanctum')->group(function () {
     // Static path HARUS di atas /assets/{asset} (route matching dari atas ke bawah),
     // kalau tidak "rekap"/"trash"/"scan"/"bulk" bakal ketangkep sebagai parameter {asset}.
     //
-    // Kelola Barang (tambah/edit/hapus/upload foto langsung) tetap admin-only.
-    // Petugas kelola barang lewat alur usulan (/perubahan di bawah) yang
-    // butuh ACC admin dulu - lihat PerubahanController.
+    // Tambah & edit barang (field teks) sekarang boleh admin & petugas
+    // KEDUANYA - petugas tidak lagi lewat alur usulan buat ini (langsung
+    // diterapkan + dicatat sebagai riwayat, lihat AssetController). Yang
+    // MASIH admin-only: rekap, sampah/restore, hapus permanen, hapus barang,
+    // hapus bulk, dan upload/hapus foto LANGSUNG (foto dari petugas tetap
+    // lewat /perubahan yang butuh ACC - lihat PerubahanController).
+    Route::post('/assets', [AssetController::class, 'store']);
+    Route::put('/assets/{asset}', [AssetController::class, 'update']);
     Route::middleware('admin')->group(function () {
         Route::get('/assets/rekap', [AssetController::class, 'rekap']);
         Route::get('/assets/trash', [AssetController::class, 'trash']);
         Route::post('/assets/{id}/restore', [AssetController::class, 'restore'])->whereNumber('id');
         Route::delete('/assets/{id}/force', [AssetController::class, 'forceDelete'])->whereNumber('id');
-        Route::post('/assets', [AssetController::class, 'store']);
         // Route bulk HARUS didaftarkan sebelum /assets/{asset} supaya "bulk"
         // tidak ketangkep sebagai parameter {asset} (route matching dari atas ke bawah).
         Route::delete('/assets/bulk', [AssetController::class, 'destroyBulk']);
-        Route::put('/assets/{asset}', [AssetController::class, 'update']);
         Route::delete('/assets/{asset}', [AssetController::class, 'destroy']);
         Route::post('/assets/{asset}/foto', [AssetController::class, 'uploadFoto']);
         Route::delete('/assets/{asset}/foto/{slot}', [AssetController::class, 'hapusFoto']);
@@ -63,13 +66,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/assets/{asset}', [AssetController::class, 'show']);
     Route::get('/assets/{asset}/qrcode', [AssetController::class, 'qrcode']);
 
-    // Usulan tambah/edit barang dari petugas (butuh ACC admin). index() &
-    // ajukanEdit()/ajukanTambah() dibuka untuk semua yang login - kontrol
-    // role (petugas vs admin) ditangani di dalam controller-nya sendiri,
-    // sedangkan setujui()/tolak() memang khusus admin.
+    // Usulan FOTO dari petugas (satu-satunya yang masih butuh ACC admin -
+    // lihat komentar di PerubahanController). index() & ajukanEdit() dibuka
+    // untuk semua yang login - kontrol role (petugas vs admin) ditangani di
+    // dalam controller-nya sendiri, sedangkan setujui()/tolak() memang khusus admin.
     Route::get('/perubahan', [PerubahanController::class, 'index']);
     Route::post('/perubahan', [PerubahanController::class, 'ajukanEdit']);
-    Route::post('/perubahan/tambah', [PerubahanController::class, 'ajukanTambah']);
     Route::middleware('admin')->group(function () {
         Route::post('/perubahan/{perubahan}/setujui', [PerubahanController::class, 'setujui']);
         Route::post('/perubahan/{perubahan}/tolak', [PerubahanController::class, 'tolak']);
@@ -81,6 +83,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Master data - boleh dilihat admin & petugas (untuk pilihan dropdown)
     Route::get('/ruangans', [RuanganController::class, 'index']);
+    // Dipakai layar Detail Ruangan setelah scan QR ruangan (fitur QR ruangan) - admin & petugas.
+    Route::get('/ruangans/{ruangan}/barang', [RuanganController::class, 'barang']);
     Route::get('/kategoris', [KategoriController::class, 'index']);
     Route::get('/pegawais', [PegawaiController::class, 'index']);
     // Teks ketentuan/user agreement peminjaman - boleh dibaca admin & petugas
