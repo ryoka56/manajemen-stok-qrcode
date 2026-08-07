@@ -89,11 +89,19 @@ class DivisiController extends Controller
             'barang_saat_ini' => Asset::with('lokasiTerakhir')->whereIn('id', $idSekarang)->orderBy('nama_barang')->get(),
             // Riwayat aktivitas terakhir di ruangan ini (barang masuk/discan
             // di sini) - murni informasi, divisi tidak bisa ubah apa pun.
+            // Ikut disertakan status/kondisi SAAT ITU + peminjam kalau ada,
+            // biar divisi bisa lihat detail "ngapain aja" barangnya, bukan
+            // cuma tanggal & nama petugas.
             'riwayat_aktivitas' => ScanLog::with(['asset:id,nama_barang,kode_aset', 'user:id,name'])
                 ->where('lokasi_input', $namaRuangan)
                 ->latest('scanned_at')
                 ->limit(30)
-                ->get(),
+                ->get([
+                    'id', 'asset_id', 'user_id', 'nama_petugas', 'nama_peminjam',
+                    'lokasi_input', 'catatan', 'is_peminjaman', 'is_pengembalian',
+                    'status_saat_itu', 'status_sebelum', 'kondisi_saat_itu', 'kondisi_sebelum',
+                    'scanned_at',
+                ]),
         ]);
     }
 }
