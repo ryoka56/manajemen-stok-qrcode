@@ -10,6 +10,8 @@ use App\Http\Controllers\Api\KategoriController;
 use App\Http\Controllers\Api\PegawaiController;
 use App\Http\Controllers\Api\StatistikController;
 use App\Http\Controllers\Api\PengaturanController;
+use App\Http\Controllers\Api\PersetujuanDivisiController;
+use App\Http\Controllers\Api\DivisiController;
 use Illuminate\Support\Facades\Route;
 
 // ---------- Publik ----------
@@ -90,6 +92,16 @@ Route::middleware('auth:sanctum')->group(function () {
     // Teks ketentuan/user agreement peminjaman - boleh dibaca admin & petugas
     Route::get('/pengaturan', [PengaturanController::class, 'show']);
 
+    // ---------- Portal Divisi (penanggung jawab per ruangan) ----------
+    // status()/submit() dibuka untuk siapa saja yang sudah login (bukan
+    // cuma role divisi) - biar konsisten sama pola /perubahan (kontrol lebih
+    // detail ditangani di dalam controller kalau perlu). rekap()/ruangans()
+    // dicek kepemilikan ruangannya sendiri di dalam DivisiController.
+    Route::get('/persetujuan-divisi', [PersetujuanDivisiController::class, 'status']);
+    Route::post('/persetujuan-divisi', [PersetujuanDivisiController::class, 'submit']);
+    Route::get('/divisi/ruangans', [DivisiController::class, 'ruangans']);
+    Route::get('/divisi/rekap', [DivisiController::class, 'rekap']);
+
     // ---------- Khusus admin ----------
     Route::middleware('admin')->group(function () {
         Route::get('/users', [AuthController::class, 'index']);
@@ -100,6 +112,8 @@ Route::middleware('auth:sanctum')->group(function () {
         // gagal (404) walau kodenya kelihatan benar. Ditambahkan di sini.
         Route::put('/users/{user}', [AuthController::class, 'update']);
         Route::delete('/users/{user}', [AuthController::class, 'destroy']);
+
+        Route::get('/persetujuan-divisi/riwayat', [PersetujuanDivisiController::class, 'riwayat']);
 
         Route::post('/ruangans', [RuanganController::class, 'store']);
         Route::put('/ruangans/{ruangan}', [RuanganController::class, 'update']);

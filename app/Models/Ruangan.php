@@ -14,4 +14,9 @@ class Ruangan extends Model
         'lokasi_gedung',
         'keterangan',
     ];
+
+    public function divisiUsers()
+    {
+        return $this->belongsToMany(User::class, 'divisi_ruangan')->withTimestamps();
+    }
 }

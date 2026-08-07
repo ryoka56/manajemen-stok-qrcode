@@ -36,8 +36,26 @@ class User extends Authenticatable
         return $this->role === 'admin';
     }
 
+    public function isDivisi(): bool
+    {
+        return $this->role === 'divisi';
+    }
+
     public function scanLogs()
     {
         return $this->hasMany(ScanLog::class);
+    }
+
+    // Ruangan yang jadi tanggung jawab akun divisi ini (bisa lebih dari 1,
+    // ditentukan admin lewat Kelola Akun). Kosong/tidak relevan untuk
+    // role admin/petugas.
+    public function ruangans()
+    {
+        return $this->belongsToMany(Ruangan::class, 'divisi_ruangan')->withTimestamps();
+    }
+
+    public function persetujuanDivisi()
+    {
+        return $this->hasMany(PersetujuanDivisi::class);
     }
 }

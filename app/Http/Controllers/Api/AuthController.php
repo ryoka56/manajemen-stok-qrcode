@@ -15,6 +15,10 @@ class AuthController extends Controller
     // memastikan akun yang login memang punya role yang sesuai portalnya.
     // Ditolak di SERVER (bukan cuma dicek di app) supaya token sama sekali
     // tidak pernah diterbitkan untuk kombinasi portal+role yang salah.
+    // Portal 'petugas' menerima DUA role: 'petugas' ATAUPUN 'divisi' -
+    // keduanya berbagi portal yang sama (dibedakan tampilannya di app
+    // berdasarkan role akun yang login), jadi expected_role tetap dikirim
+    // 'petugas' dari app dan validasinya di bawah yang melonggarkan.
     public function login(Request $request)
     {
         $data = $request->validate([
@@ -31,13 +35,20 @@ class AuthController extends Controller
             ]);
         }
 
-        if (!empty($data['expected_role']) && $user->role !== $data['expected_role']) {
-            $pesan = $data['expected_role'] === 'admin'
-                ? 'Akun ini bukan akun admin. Gunakan link login petugas.'
-                : 'Akun ini adalah akun admin. Gunakan link login admin.';
-            throw ValidationException::withMessages([
-                'email' => [$pesan],
-            ]);
+        if (!empty($data['expected_role'])) {
+            // Portal 'petugas' menerima role 'petugas' MAUPUN 'divisi'.
+            $cocok = $data['expected_role'] === 'admin'
+                ? $user->role === 'admin'
+                : in_array($user->role, ['petugas', 'divisi'], true);
+
+            if (!$cocok) {
+                $pesan = $data['expected_role'] === 'admin'
+                    ? 'Akun ini bukan akun admin. Gunakan link login petugas.'
+                    : 'Akun ini adalah akun admin. Gunakan link login admin.';
+                throw ValidationException::withMessages([
+                    'email' => [$pesan],
+                ]);
+            }
         }
 
         $token = $user->createToken('auth-token')->plainTextToken;
@@ -172,7 +183,9 @@ class AuthController extends Controller
     ];
 
     // POST /api/users
-    // Hanya admin yang boleh bikin akun petugas baru
+    // Hanya admin yang boleh bikin akun petugas/divisi baru. Untuk
+    // role='divisi', 'ruangan_ids' WAJIB diisi (minimal 1 ruangan yang jadi
+    // tanggung jawabnya) - divisi tanpa ruangan gak ada gunanya.
     public function store(Request $request)
     {
         if ($request->filled('email')) {
@@ -183,7 +196,9 @@ class AuthController extends Controller
             'name' => 'required|string|max:100',
             'email' => array_merge($this->aturanEmailGmail(), ['unique:users,email']),
             'password' => $this->aturanPassword(),
-            'role' => 'required|in:admin,petugas',
+            'role' => 'required|in:admin,petugas,divisi',
+            'ruangan_ids' => 'required_if:role,divisi|array|min:1',
+            'ruangan_ids.*' => 'integer|exists:ruangans,id',
         ], $this->pesanValidasiAkun);
 
         $user = User::create([
@@ -193,18 +208,24 @@ class AuthController extends Controller
             'role' => $data['role'],
         ]);
 
-        return response()->json($user, 201);
+        if ($data['role'] === 'divisi') {
+            $user->ruangans()->sync($data['ruangan_ids']);
+        }
+
+        return response()->json($user->load('ruangans'), 201);
     }
 
     // GET /api/users
-    // Daftar semua akun petugas/admin (untuk dikelola admin)
+    // Daftar semua akun petugas/admin/divisi (untuk dikelola admin) -
+    // sekalian bawa ruangan yang ditugaskan (relevan untuk role divisi).
     public function index()
     {
-        return response()->json(User::orderBy('name')->get());
+        return response()->json(User::with('ruangans')->orderBy('name')->get());
     }
 
     // PUT /api/users/{user}
-    // Edit akun (nama, email, role, opsional ganti password) - khusus admin
+    // Edit akun (nama, email, role, opsional ganti password, opsional ganti
+    // ruangan yang ditanggungjawabkan kalau role='divisi') - khusus admin.
     public function update(Request $request, User $user)
     {
         if ($request->filled('email')) {
@@ -224,7 +245,9 @@ class AuthController extends Controller
             'name' => 'required|string|max:100',
             'email' => array_merge($this->aturanEmailGmail(), ['unique:users,email,' . $user->id]),
             'password' => array_merge(['sometimes', 'nullable'], $this->aturanPasswordOpsional()),
-            'role' => 'required|in:admin,petugas',
+            'role' => 'required|in:admin,petugas,divisi',
+            'ruangan_ids' => 'required_if:role,divisi|array|min:1',
+            'ruangan_ids.*' => 'integer|exists:ruangans,id',
         ], $this->pesanValidasiAkun);
 
         $user->name = $data['name'];
@@ -235,7 +258,16 @@ class AuthController extends Controller
         }
         $user->save();
 
-        return response()->json($user);
+        // Sync ruangan tanggung jawab: kalau role-nya BUKAN divisi (lagi),
+        // lepas semua assignment - misalnya admin turunkan role divisi jadi
+        // petugas, jangan sampai relasi lama nyangkut di database.
+        if ($data['role'] === 'divisi') {
+            $user->ruangans()->sync($data['ruangan_ids']);
+        } else {
+            $user->ruangans()->sync([]);
+        }
+
+        return response()->json($user->load('ruangans'));
     }
 
     // DELETE /api/users/{user}
