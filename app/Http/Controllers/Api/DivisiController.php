@@ -91,8 +91,13 @@ class DivisiController extends Controller
             // di sini) - murni informasi, divisi tidak bisa ubah apa pun.
             // Ikut disertakan status/kondisi SAAT ITU + peminjam kalau ada,
             // biar divisi bisa lihat detail "ngapain aja" barangnya, bukan
-            // cuma tanggal & nama petugas.
-            'riwayat_aktivitas' => ScanLog::with(['asset:id,nama_barang,kode_aset', 'user:id,name'])
+            // cuma tanggal & nama petugas. Ikut disertakan JUGA lokasi
+            // TERKINI barangnya (lokasiTerakhir, scan paling baru di MANAPUN,
+            // bukan cuma di ruangan ini) - dipakai app buat mendeteksi kasus
+            // "status log-nya masih 'Dipinjam' di riwayat ruangan B, padahal
+            // barangnya SUDAH pindah/discan lagi di ruangan lain" - biar gak
+            // dikira masih ngendon di ruangan B.
+            'riwayat_aktivitas' => ScanLog::with(['asset:id,nama_barang,kode_aset,ruangan_asal', 'asset.lokasiTerakhir', 'user:id,name'])
                 ->where('lokasi_input', $namaRuangan)
                 ->latest('scanned_at')
                 ->limit(30)
