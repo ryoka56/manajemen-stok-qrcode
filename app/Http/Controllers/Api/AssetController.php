@@ -3,277 +3,377 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\User;
+use App\Models\Asset;
+use App\Models\AssetPerubahan;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\DB;
+use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
-class AuthController extends Controller
+class AssetController extends Controller
 {
-    // POST /api/login
-    // $data['expected_role'] (opsional) dikirim dari app admin/petugas untuk
-    // memastikan akun yang login memang punya role yang sesuai portalnya.
-    // Ditolak di SERVER (bukan cuma dicek di app) supaya token sama sekali
-    // tidak pernah diterbitkan untuk kombinasi portal+role yang salah.
-    // Portal 'petugas' menerima DUA role: 'petugas' ATAUPUN 'divisi' -
-    // keduanya berbagi portal yang sama (dibedakan tampilannya di app
-    // berdasarkan role akun yang login), jadi expected_role tetap dikirim
-    // 'petugas' dari app dan validasinya di bawah yang melonggarkan.
-    public function login(Request $request)
+    // GET /api/assets
+    // Mendukung: ?cari= (nama barang ATAU kode aset - case-insensitive),
+    // ?kategori= (filter kategori), ?ruangan= (filter ruangan/rak asal),
+    // ?status= (ada/dipinjam), ?kondisi= (tersedia/rusak),
+    // ?page= & ?per_page= (paginasi)
+    public function index(Request $request)
+    {
+        $query = Asset::with(['lokasiTerakhir', 'perubahanTertunda']);
+
+        if ($request->filled('kategori')) {
+            $query->where('kategori', $request->kategori);
+        }
+        if ($request->filled('ruangan')) {
+            $query->where('ruangan_asal', $request->ruangan);
+        }
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+        if ($request->filled('kondisi')) {
+            $query->where('kondisi', $request->kondisi);
+        }
+        if ($request->filled('cari')) {
+            // Dicari di DUA kolom sekaligus: nama_barang & kode_aset. Dipaksa
+            // pakai LOWER() di kedua sisi (kolom & inputnya) biar
+            // case-insensitive PASTI jalan apapun collation kolomnya di
+            // database (kalau kolomnya kebetulan collation case-sensitive
+            // seperti *_bin atau *_cs, LIKE biasa bakal miss "ast-0001" vs
+            // "AST-0001" - LOWER() menghindari ketergantungan itu).
+            $kata = '%' . strtolower($request->cari) . '%';
+            $query->where(function ($q) use ($kata) {
+                $q->whereRaw('LOWER(nama_barang) LIKE ?', [$kata])
+                  ->orWhereRaw('LOWER(kode_aset) LIKE ?', [$kata]);
+            });
+        }
+
+        // per_page dibatasi max 100 supaya tidak disalahgunakan buat narik semua data sekaligus
+        $perPage = (int) $request->input('per_page', 15);
+        $perPage = max(1, min($perPage, 100));
+
+        return response()->json($query->latest()->paginate($perPage));
+    }
+
+    // DELETE /api/assets/bulk
+    // Body: { "ids": [1, 2, 3, ...] } - hapus banyak barang sekaligus.
+    // Ini SOFT delete (Asset pakai trait SoftDeletes) - barang masih ada di
+    // database dengan deleted_at terisi, bisa dipulihkan lewat /assets/trash
+    // + /assets/{id}/restore kalau ternyata salah pilih.
+    public function destroyBulk(Request $request)
     {
         $data = $request->validate([
-            'email' => 'required|email',
-            'password' => 'required|string',
-            'expected_role' => 'nullable|in:admin,petugas',
+            'ids' => 'required|array|min:1',
+            'ids.*' => 'integer|exists:assets,id',
         ]);
 
-        $user = User::where('email', $data['email'])->first();
-
-        if (!$user || !Hash::check($data['password'], $user->password)) {
-            throw ValidationException::withMessages([
-                'email' => ['Email atau password salah.'],
-            ]);
-        }
-
-        if (!empty($data['expected_role'])) {
-            // Portal 'petugas' menerima role 'petugas' MAUPUN 'divisi'.
-            $cocok = $data['expected_role'] === 'admin'
-                ? $user->role === 'admin'
-                : in_array($user->role, ['petugas', 'divisi'], true);
-
-            if (!$cocok) {
-                $pesan = $data['expected_role'] === 'admin'
-                    ? 'Akun ini bukan akun admin. Gunakan link login petugas.'
-                    : 'Akun ini adalah akun admin. Gunakan link login admin.';
-                throw ValidationException::withMessages([
-                    'email' => [$pesan],
-                ]);
-            }
-        }
-
-        $token = $user->createToken('auth-token')->plainTextToken;
+        $jumlah = Asset::whereIn('id', $data['ids'])->delete();
 
         return response()->json([
-            'user' => $user,
-            'token' => $token,
+            'message' => "$jumlah barang berhasil dihapus",
+            'jumlah_dihapus' => $jumlah,
         ]);
     }
 
-    // POST /api/logout
-    public function logout(Request $request)
+    // GET /api/assets/rekap
+    // Statistik dihitung langsung oleh database (GROUP BY/COUNT), bukan
+    // ditarik semua ke app lalu dihitung manual - jauh lebih ringan begitu
+    // data sudah ribuan baris. Dipakai Tinjauan, Kelola Ruangan, dsb.
+    public function rekap(Request $request)
     {
-        $request->user()->currentAccessToken()->delete();
-        return response()->json(['message' => 'Berhasil logout']);
+        $perStatus = Asset::select('status', DB::raw('count(*) as jumlah'))
+            ->groupBy('status')
+            ->get();
+
+        $perKondisi = Asset::select('kondisi', DB::raw('count(*) as jumlah'))
+            ->groupBy('kondisi')
+            ->get();
+
+        $perKategori = Asset::select('kategori', DB::raw('count(*) as jumlah'))
+            ->groupBy('kategori')
+            ->orderByDesc('jumlah')
+            ->get();
+
+        // Lokasi SAAT INI = hasil scan terakhir kalau ada, kalau belum
+        // pernah discan fallback ke ruangan_asal (sama seperti logika
+        // yang dipakai di tampilan Kelola Barang).
+        $perRuangan = DB::table('assets')
+            ->leftJoinSub(
+                DB::table('scan_logs')
+                    ->select('asset_id', 'lokasi_input')
+                    ->whereIn('id', function ($q) {
+                        $q->select(DB::raw('MAX(id)'))->from('scan_logs')->groupBy('asset_id');
+                    }),
+                'scan_terakhir',
+                'assets.id',
+                '=',
+                'scan_terakhir.asset_id'
+            )
+            ->whereNull('assets.deleted_at')
+            ->select(
+                DB::raw('COALESCE(scan_terakhir.lokasi_input, assets.ruangan_asal) as ruangan'),
+                DB::raw('count(*) as jumlah')
+            )
+            ->groupBy('ruangan')
+            ->orderByDesc('jumlah')
+            ->get();
+
+        return response()->json([
+            'per_status' => $perStatus,
+            'per_kondisi' => $perKondisi,
+            'per_kategori' => $perKategori,
+            'per_ruangan' => $perRuangan,
+            'total' => Asset::count(),
+        ]);
     }
 
-    // GET /api/me
-    public function me(Request $request)
+    // GET /api/assets/trash - daftar barang yang sudah dihapus (soft delete), admin only
+    public function trash()
     {
-        return response()->json($request->user());
+        return response()->json(
+            Asset::onlyTrashed()->latest('deleted_at')->paginate(30)
+        );
     }
 
-    // Domain email yang diperbolehkan buat daftar/edit akun. Bukan cuma
-    // Gmail - provider besar lain yang beneran ada & terverifikasi juga
-    // diizinkan, tapi TETAP nolak domain asal-asalan/palsu.
-    // Tinggal tambah/hapus item di sini kalau admin mau buka/tutup provider
-    // lain. Daftarnya HARUS disamakan dengan _domainEmailDiizinkan di
-    // pengaturan_screen.dart (Flutter) - dua-duanya validasi email yang sama,
-    // cuma satu di server (wajib dipatuhi) satu di client (feedback cepat).
-    private const DOMAIN_EMAIL_DIIZINKAN = [
-        'gmail.com',
-        'yahoo.com',
-        'yahoo.co.id',
-        'outlook.com',
-        'hotmail.com',
-        'live.com',
-        'icloud.com',
-        'komdigi.go.id',
-        'proton.me',
-        'protonmail.com',
-    ];
-
-    // Aturan email: wajib pakai alamat email asli dari provider yang
-    // terverifikasi (bukan asal ketik domain ngawur - rawan buat
-    // keamanan). Dicek dua lapis:
-    // 1) domainnya harus salah satu dari DOMAIN_EMAIL_DIIZINKAN,
-    // 2) 'email:rfc,strict,dns' - beberapa validator email digabung:
-    //    - rfc: format dasar sesuai standar RFC 5322
-    //    - strict: lebih ketat dari rfc biasa (nolak hal aneh kayak titik
-    //      berturut-turut, dsb yang lolos di validator 'rfc' biasa)
-    //    - dns: domainnya harus punya record MX aktif (bukan cuma formatnya
-    //      bener, tapi domainnya juga beneran ada & bisa nerima email)
-    //    Sengaja TIDAK pakai validator 'spoof' - itu butuh ekstensi PHP
-    //    'intl' yang belum aktif di server (Railway), dan kalau dipaksa
-    //    malah bikin exception 500 setiap kali nambah/edit akun.
-    private function aturanEmailGmail(): array
+    // POST /api/assets/{id}/restore - kembalikan barang yang sudah dihapus, admin only
+    public function restore($id)
     {
-        $domainPola = implode('|', array_map(
-            fn ($d) => preg_quote($d, '/'),
-            self::DOMAIN_EMAIL_DIIZINKAN
-        ));
-
-        return [
-            'required',
-            'string',
-            'email:rfc,strict,dns',
-            'max:150',
-            'regex:/^[a-zA-Z0-9._%+-]+@(' . $domainPola . ')$/i',
-        ];
+        $asset = Asset::onlyTrashed()->findOrFail($id);
+        $asset->restore();
+        return response()->json(['message' => 'Barang berhasil dipulihkan', 'asset' => $asset]);
     }
 
-    // Gmail mengabaikan titik di local-part dan apapun setelah '+' (alias),
-    // jadi "j.ohn.doe@gmail.com", "johndoe@gmail.com", dan
-    // "johndoe+petugas@gmail.com" semuanya nyasar ke kotak masuk yang SAMA.
-    // Tanpa normalisasi ini, satu orang bisa "asal-asalan" bikin banyak akun
-    // yang keliatan beda padahal email tujuannya sama persis - atau
-    // sebaliknya, mengaku pakai email tertentu padahal itu bukan alamat asli
-    // yang dia kontrol penuh. Dipanggil sebelum validasi & sebelum disimpan,
-    // supaya prosesnya konsisten (dicek dg bentuk yang sama, disimpan
-    // dengan bentuk yang sama).
-    private function normalisasiEmail(string $email): string
+    // DELETE /api/assets/{id}/force - hapus PERMANEN (gak bisa direstore lagi), admin only
+    public function forceDelete($id)
     {
-        $email = strtolower(trim($email));
-
-        if (!str_contains($email, '@')) {
-            return $email;
-        }
-
-        [$lokal, $domain] = explode('@', $email, 2);
-
-        if ($domain === 'gmail.com' || $domain === 'googlemail.com') {
-            $lokal = explode('+', $lokal)[0];   // buang alias setelah '+'
-            $lokal = str_replace('.', '', $lokal); // titik diabaikan Gmail
-            $domain = 'gmail.com';
-        }
-
-        return $lokal . '@' . $domain;
+        $asset = Asset::onlyTrashed()->findOrFail($id);
+        $nama = $asset->nama_barang;
+        $asset->forceDelete();
+        return response()->json(['message' => "\"$nama\" dihapus permanen"]);
     }
 
-    // Aturan password: minimal 8 karakter, dan wajib ada huruf & angkanya.
-    private function aturanPassword(): array
-    {
-        return [
-            'required',
-            'string',
-            'min:8',
-            'regex:/^(?=.*[A-Za-z])(?=.*\d).+$/', // wajib ada huruf & angka
-        ];
-    }
-
-    // Sama seperti aturanPassword(), TAPI tanpa 'required' - dipakai waktu
-    // edit akun, di mana password boleh dikosongkan/tidak dikirim sama
-    // sekali (artinya "tidak diganti"). 'required' dan 'nullable' tidak
-    // boleh digabung dalam satu rule set (saling bertentangan) - itu bug
-    // sebelumnya yang bikin ganti password di akun yang sudah ada selalu
-    // gagal walau passwordnya sudah diisi benar.
-    private function aturanPasswordOpsional(): array
-    {
-        return [
-            'string',
-            'min:8',
-            'regex:/^(?=.*[A-Za-z])(?=.*\d).+$/',
-        ];
-    }
-
-    private array $pesanValidasiAkun = [
-        'email.regex' => 'Domain email ini tidak diizinkan. Cek daftar domain yang didukung di menu Pengaturan.',
-        'email.email' => 'Format email tidak valid atau domainnya tidak terdaftar.',
-        'password.min' => 'Password minimal 8 karakter.',
-        'password.regex' => 'Password minimal 8 karakter dan harus mengandung huruf serta angka.',
-    ];
-
-    // POST /api/users
-    // Hanya admin yang boleh bikin akun petugas/divisi baru. Untuk
-    // role='divisi', 'ruangan_ids' WAJIB diisi (minimal 1 ruangan yang jadi
-    // tanggung jawabnya) - divisi tanpa ruangan gak ada gunanya.
+    // POST /api/assets - admin & petugas BOLEH keduanya (lihat route).
+    // Petugas tambah barang langsung masuk database (tidak lagi lewat
+    // usulan/ACC) - satu-satunya yang masih butuh ACC admin adalah foto,
+    // itu jalan terpisah lewat PerubahanController setelah barang ini ada.
+    // Supaya admin tetap bisa lihat riwayat "barang apa yang ditambahkan
+    // petugas", tiap tambah dicatat sebagai baris asset_perubahan dengan
+    // otomatis=true, status='disetujui' dari awal (murni audit trail, BUKAN
+    // usulan yang perlu diklik ACC).
     public function store(Request $request)
     {
-        if ($request->filled('email')) {
-            $request->merge(['email' => $this->normalisasiEmail($request->input('email'))]);
-        }
-
         $data = $request->validate([
-            'name' => 'required|string|max:100',
-            'email' => array_merge($this->aturanEmailGmail(), ['unique:users,email']),
-            'password' => $this->aturanPassword(),
-            'role' => 'required|in:admin,petugas,divisi',
-            'ruangan_ids' => 'required_if:role,divisi|array|min:1',
-            'ruangan_ids.*' => 'integer|exists:ruangans,id',
-        ], $this->pesanValidasiAkun);
-
-        $user = User::create([
-            'name' => $data['name'],
-            'email' => $data['email'],
-            'password' => Hash::make($data['password']),
-            'role' => $data['role'],
+            'nama_barang' => 'required|string|max:255',
+            'kategori' => 'required|string|max:100',
+            'deskripsi' => 'nullable|string',
+            'ruangan_asal' => 'nullable|string|max:100',
+            'kondisi' => 'sometimes|in:tersedia,rusak',
         ]);
 
-        if ($data['role'] === 'divisi') {
-            $user->ruangans()->sync($data['ruangan_ids']);
-        }
+        // Generate kode aset unik otomatis, mis. AST-000123.
+        // PENTING: pakai withTrashed() supaya baris yang sudah di-soft-delete
+        // (masih ada di database, cuma ditandai deleted_at) tetap ikut
+        // dihitung - kalau tidak, nomornya bisa "dipakai ulang" dan tabrakan
+        // sama kode_aset punya barang yang sudah dihapus tapi belum permanen.
+        $data['kode_aset'] = 'AST-' . str_pad((Asset::withTrashed()->max('id') + 1), 6, '0', STR_PAD_LEFT);
 
-        return response()->json($user->load('ruangans'), 201);
+        $user = $request->user();
+
+        $asset = DB::transaction(function () use ($data, $user) {
+            $asset = Asset::create($data);
+
+            AssetPerubahan::create([
+                'asset_id' => $asset->id,
+                'jenis' => 'tambah',
+                'data_usulan' => $asset->only(['nama_barang', 'kategori', 'deskripsi', 'ruangan_asal', 'kondisi']),
+                'data_lama' => null,
+                'status' => 'disetujui',
+                'otomatis' => true,
+                'diajukan_oleh' => $user->id,
+                'diproses_oleh' => $user->id,
+                'diproses_pada' => now(),
+            ]);
+
+            return $asset;
+        });
+
+        return response()->json($asset, 201);
     }
 
-    // GET /api/users
-    // Daftar semua akun petugas/admin/divisi (untuk dikelola admin) -
-    // sekalian bawa ruangan yang ditugaskan (relevan untuk role divisi).
-    public function index()
+    // GET /api/assets/{asset}
+    public function show(Asset $asset)
     {
-        return response()->json(User::with('ruangans')->orderBy('name')->get());
+        return response()->json($asset->load(['scanLogs', 'lokasiTerakhir']));
     }
 
-    // PUT /api/users/{user}
-    // Edit akun (nama, email, role, opsional ganti password, opsional ganti
-    // ruangan yang ditanggungjawabkan kalau role='divisi') - khusus admin.
-    public function update(Request $request, User $user)
+    // PUT /api/assets/{asset} - admin & petugas BOLEH keduanya (lihat route).
+    // Sejak fitur "petugas edit langsung", field TEKS (nama/kategori/dst)
+    // diterapkan seketika tanpa ACC. Cuma foto yang masih lewat
+    // PerubahanController (butuh ACC admin). 'status' (ada/dipinjam/hilang)
+    // dan 'ruangan_asal' (posisi awal) TETAP cuma bisa diubah admin - itu
+    // murni hasil alur Scan / koreksi manual admin, bukan sesuatu yang
+    // diedit bebas dari Kelola Barang (sama seperti aturan lama untuk status).
+    // Tiap perubahan (dari admin maupun petugas) dicatat ke asset_perubahan
+    // (otomatis=true, status='disetujui') murni buat riwayat/audit -
+    // supaya admin bisa lihat apa saja yang diubah petugas. Admin tetap bisa ubah
+    // langsung dari sini (termasuk override status/kondisi manual buat
+    // koreksi cepat) - perubahan lewat sini TIDAK membuat ScanLog baru,
+    // jadi tidak tercatat di riwayat lokasi/TTD.
+    public function update(Request $request, Asset $asset)
     {
-        if ($request->filled('email')) {
-            $request->merge(['email' => $this->normalisasiEmail($request->input('email'))]);
-        }
-
-        // Password itu OPSIONAL saat edit (kosong/tidak dikirim = tidak diganti).
-        // Sebelumnya rule password gabungan ['nullable', 'required', ...] -
-        // 'nullable' cuma melewatkan validasi kalau nilainya benar-benar null,
-        // padahal dari form Flutter yang dikirim adalah STRING KOSONG saat
-        // pengguna tidak mau ganti password (lihat ApiService.updateUser: kunci
-        // 'password' malah sengaja tidak disertakan sama sekali kalau kosong,
-        // tapi kalau suatu saat dikirim string kosong tetap akan gagal kena
-        // 'required'/'min:8'). Makanya di sini rule password HANYA diterapkan
-        // kalau field-nya memang diisi (filled), sesuai instruksi 'sometimes'.
         $data = $request->validate([
-            'name' => 'required|string|max:100',
-            'email' => array_merge($this->aturanEmailGmail(), ['unique:users,email,' . $user->id]),
-            'password' => array_merge(['sometimes', 'nullable'], $this->aturanPasswordOpsional()),
-            'role' => 'required|in:admin,petugas,divisi',
-            'ruangan_ids' => 'required_if:role,divisi|array|min:1',
-            'ruangan_ids.*' => 'integer|exists:ruangans,id',
-        ], $this->pesanValidasiAkun);
+            'nama_barang' => 'sometimes|string|max:255',
+            'kategori' => 'sometimes|string|max:100',
+            'deskripsi' => 'nullable|string',
+            'ruangan_asal' => 'nullable|string|max:100',
+            'status' => 'sometimes|in:ada,dipinjam,hilang',
+            'kondisi' => 'sometimes|in:tersedia,rusak',
+        ]);
 
-        $user->name = $data['name'];
-        $user->email = $data['email'];
-        $user->role = $data['role'];
-        if (!empty($data['password'])) {
-            $user->password = Hash::make($data['password']);
-        }
-        $user->save();
+        $user = $request->user();
 
-        // Sync ruangan tanggung jawab: kalau role-nya BUKAN divisi (lagi),
-        // lepas semua assignment - misalnya admin turunkan role divisi jadi
-        // petugas, jangan sampai relasi lama nyangkut di database.
-        if ($data['role'] === 'divisi') {
-            $user->ruangans()->sync($data['ruangan_ids']);
-        } else {
-            $user->ruangans()->sync([]);
+        // 'ruangan_asal' & 'status' cuma boleh diubah admin - petugas yang
+        // kirim field ini (mis. lewat request manual di luar app, atau form
+        // Kelola Barang versi lama) diam-diam diabaikan, bukan ditolak, biar
+        // UI petugas yang sudah gak nampilin field ini gak perlu ganti kode.
+        // 'ruangan_asal' sengaja dikunci ketat: begitu barang dibuat, posisi
+        // awalnya HARUS tetap jadi acuan tetap kecuali admin sendiri yang
+        // sengaja mengoreksinya - tidak boleh "kegeser" diam-diam lewat alur
+        // lain (mis. petugas edit field lain tapi ruangan ikut kebawa ganti).
+        if (!$user->isAdmin()) {
+            unset($data['status']);
+            unset($data['ruangan_asal']);
         }
 
-        return response()->json($user->load('ruangans'));
+        if (empty($data)) {
+            return response()->json($asset);
+        }
+
+        $dataLamaUntukField = $asset->only(array_keys($data));
+
+        DB::transaction(function () use ($asset, $data, $user, $dataLamaUntukField) {
+            $asset->update($data);
+
+            // Cuma dicatat kalau ada nilai yang BENERAN berubah (bukan
+            // kirim ulang nilai yang sama), biar riwayat gak nyampah.
+            $benerBeda = false;
+            foreach ($data as $key => $value) {
+                if ((string) ($dataLamaUntukField[$key] ?? '') !== (string) ($value ?? '')) {
+                    $benerBeda = true;
+                    break;
+                }
+            }
+            if (!$benerBeda) {
+                return;
+            }
+
+            AssetPerubahan::create([
+                'asset_id' => $asset->id,
+                'jenis' => 'edit',
+                'data_usulan' => $data,
+                'data_lama' => $dataLamaUntukField,
+                'status' => 'disetujui',
+                'otomatis' => true,
+                'diajukan_oleh' => $user->id,
+                'diproses_oleh' => $user->id,
+                'diproses_pada' => now(),
+            ]);
+        });
+
+        return response()->json($asset->fresh());
     }
 
-    // DELETE /api/users/{user}
-    public function destroy(User $user)
+    // DELETE /api/assets/{asset} - soft delete, bisa dipulihkan lewat trash
+    public function destroy(Asset $asset)
     {
-        $user->delete();
-        return response()->json(['message' => 'Akun berhasil dihapus']);
+        $asset->delete();
+        return response()->json(['message' => 'Aset berhasil dihapus (bisa dipulihkan lewat menu Sampah)']);
+    }
+
+    // POST /api/assets/{asset}/foto - upload/ganti foto di slot 1/2/3.
+    // Khusus admin (lihat middleware route) - upload foto petugas sekarang
+    // lewat PerubahanController (butuh ACC admin dulu juga, sesuai
+    // keputusan supaya foto yang diupload petugas tetap diverifikasi).
+    // Body: multipart, field 'foto' (file gambar) + 'slot' (1, 2, atau 3)
+    public function uploadFoto(Request $request, Asset $asset)
+    {
+        $data = $request->validate([
+            'slot' => 'required|integer|in:1,2,3',
+            'foto' => 'required|image|max:5120', // maks 5MB
+        ]);
+
+        $kolom = 'foto_' . $data['slot'];
+
+        // Hapus file lama di slot itu dulu (kalau ada) biar storage gak numpuk sampah
+        if ($asset->$kolom) {
+            \Illuminate\Support\Facades\Storage::disk('public')->delete($asset->$kolom);
+        }
+
+        $path = $request->file('foto')->store('asset-photos', 'public');
+        $asset->update([
+            $kolom => $path,
+            $kolom . '_oleh' => $request->user()->name,
+            $kolom . '_pada' => now(),
+        ]);
+
+        return response()->json($asset->fresh());
+    }
+
+    // DELETE /api/assets/{asset}/foto/{slot} - hapus foto di slot tertentu (admin only)
+    public function hapusFoto(Asset $asset, $slot)
+    {
+        if (!in_array($slot, ['1', '2', '3'])) {
+            return response()->json(['message' => 'Slot foto tidak valid'], 422);
+        }
+        $kolom = 'foto_' . $slot;
+
+        if ($asset->$kolom) {
+            \Illuminate\Support\Facades\Storage::disk('public')->delete($asset->$kolom);
+        }
+        $asset->update([
+            $kolom => null,
+            $kolom . '_oleh' => null,
+            $kolom . '_pada' => null,
+        ]);
+
+        return response()->json($asset->fresh());
+    }
+
+    // GET /foto/{path} - "serve" file foto lewat Laravel (bukan diakses
+    // langsung dari folder storage statis), khusus biar bisa nambahin header
+    // CORS. Soalnya Flutter Web (canvas renderer) ngambil gambar pakai
+    // fetch/XHR, bukan tag <img> biasa - itu WAJIB ada header CORS dari
+    // server, sedangkan file statis di /storage dilayani langsung sama web
+    // server (Nginx/Caddy Railway), gak lewat kode Laravel sama sekali,
+    // jadi konfigurasi CORS Laravel gak kesentuh di situ.
+    public function tampilkanFoto(Request $request, $path)
+    {
+        $fullPath = storage_path('app/public/' . $path);
+
+        if (!file_exists($fullPath) || !str_starts_with(realpath($fullPath), storage_path('app/public'))) {
+            abort(404);
+        }
+
+        return response()->file($fullPath, [
+            'Access-Control-Allow-Origin' => '*',
+            'Cache-Control' => 'public, max-age=86400',
+        ]);
+    }
+
+    // GET /api/assets/{asset}/qrcode
+    // Menghasilkan gambar QR-code berisi kode_aset, untuk ditempel di barang fisik
+    public function qrcode(Asset $asset)
+    {
+        $qr = QrCode::size(300)->generate($asset->kode_aset);
+        return response($qr)->header('Content-Type', 'image/svg+xml');
+    }
+
+    // GET /api/assets/scan/{kode_aset}
+    // Dipanggil aplikasi mobile setelah scan QR untuk ambil detail barang
+    public function scan($kode_aset)
+    {
+        $asset = Asset::where('kode_aset', $kode_aset)
+            ->with(['lokasiTerakhir', 'scanLogs' => fn ($q) => $q->latest('scanned_at')->limit(5)])
+            ->firstOrFail();
+
+        return response()->json($asset);
     }
 }
